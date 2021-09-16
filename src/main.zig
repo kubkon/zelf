@@ -12,8 +12,9 @@ pub fn main() anyerror!void {
     const stdout = std.io.getStdOut().writer();
 
     const params = comptime [_]clap.Param(clap.Help){
-        clap.parseParam("--help              Display this help and exit") catch unreachable,
-        clap.parseParam("-h, --file-header   Display the ELF file header") catch unreachable,
+        clap.parseParam("--help                  Display this help and exit") catch unreachable,
+        clap.parseParam("-h, --file-header       Display the ELF file header") catch unreachable,
+        clap.parseParam("-S, --section-headers   Display the sections' header") catch unreachable,
         clap.parseParam("<FILE>") catch unreachable,
     };
 
@@ -39,6 +40,8 @@ pub fn main() anyerror!void {
 
     if (args.flag("--file-header")) {
         try elf.printHeader(stdout);
+    } else if (args.flag("--section-headers")) {
+        try elf.printShdrs(stdout);
     } else {
         return printUsageWithHelp(&params, stderr);
     }
