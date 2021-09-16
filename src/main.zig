@@ -2,6 +2,8 @@ const std = @import("std");
 const clap = @import("clap");
 const fs = std.fs;
 
+const Elf = @import("Elf.zig");
+
 var global_alloc = std.heap.GeneralPurposeAllocator(.{}){};
 const gpa = &global_alloc.allocator;
 
@@ -31,7 +33,15 @@ pub fn main() anyerror!void {
     const file = try fs.cwd().openFile(filename, .{});
     defer file.close();
 
-    std.log.info("All your codebase are belong to us.", .{});
+    var elf = Elf.init(gpa, file);
+    defer elf.deinit();
+    try elf.parseMetadata();
+
+    if (args.flag("--file-header")) {
+        try elf.printHeader(stdout);
+    } else {
+        return printUsageWithHelp(&params, stderr);
+    }
 }
 
 fn printUsageWithHelp(comptime params: []const clap.Param(clap.Help), writer: anytype) !void {
