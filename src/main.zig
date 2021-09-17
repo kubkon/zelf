@@ -16,6 +16,7 @@ pub fn main() anyerror!void {
         clap.parseParam("-a, --all               Equivalent to having all flags on") catch unreachable,
         clap.parseParam("-h, --file-header       Display the ELF file header") catch unreachable,
         clap.parseParam("-S, --section-headers   Display the sections' header") catch unreachable,
+        clap.parseParam("-s, --symbols           Display the symbol table") catch unreachable,
         clap.parseParam("<FILE>") catch unreachable,
     };
 
@@ -39,17 +40,20 @@ pub fn main() anyerror!void {
     defer elf.deinit();
     try elf.parseMetadata();
 
-    const print_header = args.flag("--all") or args.flag("--file-header");
-    const print_shdrs = args.flag("--all") or args.flag("--section-headers");
-
-    if (!print_header and !print_shdrs) {
-        return printUsageWithHelp(&params, stderr);
-    }
-    if (print_header) {
+    if (args.flag("--all")) {
         try elf.printHeader(stdout);
-    }
-    if (print_shdrs) {
+        try stdout.writeAll("\n");
         try elf.printShdrs(stdout);
+        try stdout.writeAll("\n");
+        try elf.printSymtab(stdout);
+    } else if (args.flag("--file-header")) {
+        try elf.printHeader(stdout);
+    } else if (args.flag("--section-headers")) {
+        try elf.printShdrs(stdout);
+    } else if (args.flag("--symbols")) {
+        try elf.printSymtab(stdout);
+    } else {
+        return printUsageWithHelp(&params, stderr);
     }
 }
 

@@ -10,6 +10,7 @@ zelf [-hS] [--help] <FILE>
         -a, --all               Equivalent to having all flags on
         -h, --file-header       Display the ELF file header
         -S, --section-headers   Display the sections' header
+        -s, --symbols           Display the symbol table
 ```
 
 Currently supported flags. More to come.
@@ -30,6 +31,7 @@ ELF Header:
   Size of section headers: 64 (bytes)
   Number of section headers: 10
   Section header string table index: 8
+
 There are 10 section headers, starting at offset 0x250:
 
 Section Headers:
@@ -55,6 +57,20 @@ Section Headers:
         0000000000000062  0000000000000000            0     0     1
   [ 9]  .strtab           STRTAB            0000000000000000  000000000000022a
         0000000000000022  0000000000000000            0     0     1
+
+Symbol table '.symtab' contains 10 entries:
+  Num:            Value  Size Type    Bind   Vis      Ndx   Name
+    0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND
+    1: 0000000000000000     0 FILE    LOCAL  DEFAULT  ABS   main.c
+    2: 0000000000000000    15 OBJECT  LOCAL  DEFAULT  3     .L.str
+    3: 0000000000000000     0 SECTION LOCAL  DEFAULT  1
+    4: 0000000000000000     0 SECTION LOCAL  DEFAULT  5
+    5: 0000000000000000     0 SECTION LOCAL  DEFAULT  3
+    6: 0000000000000000     0 SECTION LOCAL  DEFAULT  4
+    7: 0000000000000000     0 NOTYPE  GLOBAL DEFAULT  UND   fwrite
+    8: 0000000000000000    37 FUNC    GLOBAL DEFAULT  1     main
+    9: 0000000000000000     0 NOTYPE  GLOBAL DEFAULT  UND   stderr
+
 ```
 
 ## Building from source
