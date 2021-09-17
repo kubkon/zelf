@@ -33,6 +33,19 @@ strtab_shdr_index: ?u16 = null,
 symtab: std.ArrayListUnmanaged(elf.Elf64_Sym) = .{},
 strtab: std.ArrayListUnmanaged(u8) = .{},
 
+sections: std.ArrayListUnmanaged(Section) = .{},
+shdr_ndx_section_table: std.AutoHashMapUnmanaged(u16, u16) = .{},
+
+const Section = struct {
+    data: std.ArrayListUnmanaged(u8) = .{},
+    relocs: std.ArrayListUnmanaged(elf.Elf64_Rela) = .{},
+
+    fn deinit(self: *Section, allocator: *Allocator) void {
+        self.data.deinit(allocator);
+        self.relocs.deinit(allocator);
+    }
+};
+
 pub fn init(allocator: *Allocator, file: fs.File) Elf {
     return .{
         .allocator = allocator,
@@ -45,6 +58,11 @@ pub fn deinit(self: *Elf) void {
     self.shstrtab.deinit(self.allocator);
     self.symtab.deinit(self.allocator);
     self.strtab.deinit(self.allocator);
+    for (self.sections.items) |*sect| {
+        sect.deinit(self.allocator);
+    }
+    self.sections.deinit(self.allocator);
+    self.shdr_ndx_section_table.deinit(self.allocator);
 }
 
 pub fn parseMetadata(self: *Elf) !void {
@@ -106,6 +124,29 @@ pub fn parseMetadata(self: *Elf) !void {
         var buffer = try self.readShdrContents(strtab_index);
         defer self.allocator.free(buffer);
         try self.strtab.appendSlice(self.allocator, buffer);
+    }
+
+    // Parse sections
+    for (self.shdrs.items) |shdr, i| {
+        const ndx = @intCast(u16, i);
+        switch (shdr.sh_type) {
+            elf.SHT_PROGBITS => {
+                const sect_index = @intCast(u16, self.sections.items.len);
+                const sect = try self.sections.addOne(self.allocator);
+                sect.* = .{};
+                var buffer = try self.allocator.alloc(u8, shdr.sh_size);
+                defer self.allocator.free(buffer);
+                const amt = try self.file.preadAll(buffer, shdr.sh_offset);
+                assert(amt == buffer.len);
+                try sect.data.appendSlice(self.allocator, buffer);
+                try self.shdr_ndx_section_table.putNoClobber(self.allocator, ndx, sect_index);
+            },
+            elf.SHT_REL, elf.SHT_RELA => {
+                const symtab_shdr_ndx = shdr.sh_link; // TODO not sure what to do with this yet.
+                const sect_shdr_ndx = shdr.sh_info;
+            },
+            else => continue,
+        }
     }
 }
 
