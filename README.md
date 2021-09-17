@@ -7,6 +7,7 @@ Zig's ELF parsing utility - a replacement (maybe someday) utility for `readelf` 
 ```
 zelf [-hS] [--help] <FILE>
             --help              Display this help and exit
+        -a, --all               Equivalent to having all flags on
         -h, --file-header       Display the ELF file header
         -S, --section-headers   Display the sections' header
 ```
@@ -16,7 +17,7 @@ Currently supported flags. More to come.
 Typical output will look something like this.
 
 ```
-> zelf -h main.o
+> zelf -a main.o
 ELF Header:
   Endianness: Endian.Little
   Machine: AMD x86-64 architecture
@@ -29,8 +30,6 @@ ELF Header:
   Size of section headers: 64 (bytes)
   Number of section headers: 10
   Section header string table index: 8
-
-> zelf -S main.o
 There are 10 section headers, starting at offset 0x250:
 
 Section Headers:

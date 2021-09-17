@@ -13,6 +13,7 @@ pub fn main() anyerror!void {
 
     const params = comptime [_]clap.Param(clap.Help){
         clap.parseParam("--help                  Display this help and exit") catch unreachable,
+        clap.parseParam("-a, --all               Equivalent to having all flags on") catch unreachable,
         clap.parseParam("-h, --file-header       Display the ELF file header") catch unreachable,
         clap.parseParam("-S, --section-headers   Display the sections' header") catch unreachable,
         clap.parseParam("<FILE>") catch unreachable,
@@ -38,12 +39,17 @@ pub fn main() anyerror!void {
     defer elf.deinit();
     try elf.parseMetadata();
 
-    if (args.flag("--file-header")) {
-        try elf.printHeader(stdout);
-    } else if (args.flag("--section-headers")) {
-        try elf.printShdrs(stdout);
-    } else {
+    const print_header = args.flag("--all") or args.flag("--file-header");
+    const print_shdrs = args.flag("--all") or args.flag("--section-headers");
+
+    if (!print_header and !print_shdrs) {
         return printUsageWithHelp(&params, stderr);
+    }
+    if (print_header) {
+        try elf.printHeader(stdout);
+    }
+    if (print_shdrs) {
+        try elf.printShdrs(stdout);
     }
 }
 
