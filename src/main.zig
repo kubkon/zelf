@@ -17,6 +17,7 @@ pub fn main() anyerror!void {
         clap.parseParam("-h, --file-header       Display the ELF file header") catch unreachable,
         clap.parseParam("-S, --section-headers   Display the sections' header") catch unreachable,
         clap.parseParam("-s, --symbols           Display the symbol table") catch unreachable,
+        clap.parseParam("-r, --relocs            Display the relocations (if present)") catch unreachable,
         clap.parseParam("<FILE>") catch unreachable,
     };
 
@@ -45,13 +46,17 @@ pub fn main() anyerror!void {
         try stdout.writeAll("\n");
         try elf.printShdrs(stdout);
         try stdout.writeAll("\n");
-        try elf.printSymtab(stdout);
+        try elf.printRelocs(stdout);
+        try stdout.writeAll("\n");
+        try elf.printSymtabs(stdout);
     } else if (args.flag("--file-header")) {
         try elf.printHeader(stdout);
     } else if (args.flag("--section-headers")) {
         try elf.printShdrs(stdout);
+    } else if (args.flag("--relocs")) {
+        try elf.printRelocs(stdout);
     } else if (args.flag("--symbols")) {
-        try elf.printSymtab(stdout);
+        try elf.printSymtabs(stdout);
     } else {
         return printUsageWithHelp(&params, stderr);
     }
