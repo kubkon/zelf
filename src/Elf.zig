@@ -1,6 +1,7 @@
 const Elf = @This();
 
 const std = @import("std");
+const bits = @import("bits.zig");
 const assert = std.debug.assert;
 const elf = std.elf;
 const fmt = std.fmt;
@@ -9,16 +10,6 @@ const log = std.log.scoped(.zelf);
 const mem = std.mem;
 
 const Allocator = mem.Allocator;
-
-// TODO add these to upstream Zig
-const SHN_UNDEF = 0;
-const SHN_LORESERVE = 0xff00;
-const SHN_LOPROC = 0xff00;
-const SHN_HIPROC = 0xff1f;
-const SHN_LIVEPATCH = 0xff20;
-const SHN_ABS = 0xfff1;
-const SHN_COMMON = 0xfff2;
-const SHN_HIRESERVE = 0xffff;
 
 allocator: *Allocator,
 file: fs.File,
@@ -173,16 +164,44 @@ pub fn printShdrs(self: Elf, writer: anytype) !void {
 }
 
 pub fn printRelocs(self: Elf, writer: anytype) !void {
+    var has_relocs = false;
     for (self.shdrs.items) |shdr, i| {
         switch (shdr.sh_type) {
             elf.SHT_REL, elf.SHT_RELA => {},
             else => continue,
         }
 
-        var strtab = blk: {
-            const symtab_shdr = self.shdrs.items[shdr.sh_link];
-            break :blk try self.readShdrContents(@intCast(u16, symtab_shdr.sh_link));
+        has_relocs = true;
+        const symtab_shdr = self.shdrs.items[shdr.sh_link];
+        var symtab = blk: {
+            var buffer = try self.readShdrContents(@intCast(u16, shdr.sh_link));
+            defer self.allocator.free(buffer);
+            const nsyms = @divExact(symtab_shdr.sh_size, symtab_shdr.sh_entsize);
+            var symtab = try self.allocator.alloc(elf.Elf64_Sym, nsyms);
+
+            if (self.header.is_64) {
+                // TODO non-native endianness
+                const syms = @alignCast(@alignOf(elf.Elf64_Sym), mem.bytesAsSlice(elf.Elf64_Sym, buffer));
+                mem.copy(elf.Elf64_Sym, symtab, syms);
+            } else {
+                // TODO non-native endianness
+                const syms = @alignCast(@alignOf(elf.Elf32_Sym), mem.bytesAsSlice(elf.Elf32_Sym, buffer));
+                for (syms) |sym, j| {
+                    symtab[j] = .{
+                        .st_name = sym.st_name,
+                        .st_info = sym.st_info,
+                        .st_other = sym.st_other,
+                        .st_shndx = sym.st_shndx,
+                        .st_value = sym.st_value,
+                        .st_size = sym.st_size,
+                    };
+                }
+            }
+
+            break :blk symtab;
         };
+        defer self.allocator.free(symtab);
+        var strtab = try self.readShdrContents(@intCast(u16, symtab_shdr.sh_link));
         defer self.allocator.free(strtab);
 
         var buffer = try self.readShdrContents(@intCast(u16, i));
@@ -221,9 +240,79 @@ pub fn printRelocs(self: Elf, writer: anytype) !void {
             }
         }
 
+        try writer.print("Relocation section '{s}' at offset 0x{x} contains {d} entries:\n", .{
+            self.getShString(shdr.sh_name),
+            shdr.sh_offset,
+            nrelocs,
+        });
+        try writer.print(
+            "  Offset{s: <8}Info{s: <12}Type{s: <20}Sym. Value{s: <2}Sym. Name + Addend\n",
+            .{ "", "", "", "" },
+        );
+
         for (relocs) |reloc| {
-            try writer.print("{}\n", .{reloc});
+            const r_sym = reloc.r_info >> 32;
+            const sym = symtab[r_sym];
+            const sym_name = getString(strtab, sym.st_name);
+            const r_type = @truncate(u32, reloc.r_info);
+            const rel_type = &switch (r_type) {
+                bits.R_X86_64_NONE => "R_X86_64_NONE",
+                bits.R_X86_64_64 => "R_X86_64_64",
+                bits.R_X86_64_PC32 => "R_X86_64_PC32",
+                bits.R_X86_64_GOT32 => "R_X86_64_GOT32",
+                bits.R_X86_64_PLT32 => "R_X86_64_PLT32",
+                bits.R_X86_64_COPY => "R_X86_64_COPY",
+                bits.R_X86_64_GLOB_DAT => "R_X86_64_GLOB_DAT",
+                bits.R_X86_64_JUMP_SLOT => "R_X86_64_JUMP_SLOT",
+                bits.R_X86_64_RELATIVE => "R_X86_64_RELATIVE",
+                bits.R_X86_64_GOTPCREL => "R_X86_64_GOTPCREL",
+                bits.R_X86_64_32 => "R_X86_64_32",
+                bits.R_X86_64_32S => "R_X86_64_32S",
+                bits.R_X86_64_16 => "R_X86_64_16",
+                bits.R_X86_64_PC16 => "R_X86_64_PC16",
+                bits.R_X86_64_8 => "R_X86_64_8",
+                bits.R_X86_64_PC8 => "R_X86_64_PC8",
+                bits.R_X86_64_DTPMOD64 => "R_X86_64_DTPMOD64",
+                bits.R_X86_64_DTPOFF64 => "R_X86_64_DTPOFF64",
+                bits.R_X86_64_TPOFF64 => "R_X86_64_TPOFF64",
+                bits.R_X86_64_TLSGD => "R_X86_64_TLSGD",
+                bits.R_X86_64_TLSLD => "R_X86_64_TLSLD",
+                bits.R_X86_64_DTPOFF32 => "R_X86_64_DTPOFF32",
+                bits.R_X86_64_GOTTPOFF => "R_X86_64_GOTTPOFF",
+                bits.R_X86_64_TPOFF32 => "R_X86_64_TPOFF32",
+                bits.R_X86_64_PC64 => "R_X86_64_PC64",
+                bits.R_X86_64_GOTOFF64 => "R_X86_64_GOTOFF64",
+                bits.R_X86_64_GOTPC32 => "R_X86_64_GOTPC32",
+                bits.R_X86_64_GOT64 => "R_X86_64_GOT64",
+                bits.R_X86_64_GOTPCREL64 => "R_X86_64_GOTPCREL64",
+                bits.R_X86_64_GOTPC64 => "R_X86_64_GOTPC64",
+                bits.R_X86_64_GOTPLT64 => "R_X86_64_GOTPLT64",
+                bits.R_X86_64_PLTOFF64 => "R_X86_64_PLTOFF64",
+                bits.R_X86_64_SIZE32 => "R_X86_64_SIZE32",
+                bits.R_X86_64_SIZE64 => "R_X86_64_SIZE64",
+                bits.R_X86_64_GOTPC32_TLSDESC => "R_X86_64_GOTPC32_TLSDESC",
+                bits.R_X86_64_TLSDESC_CALL => "R_X86_64_TLSDESC_CALL",
+                bits.R_X86_64_TLSDESC => "R_X86_64_TLSDESC",
+                bits.R_X86_64_IRELATIVE => "R_X86_64_IRELATIVE",
+                bits.R_X86_64_RELATIVE64 => "R_X86_64_RELATIVE64",
+                bits.R_X86_64_GOTPCRELX => "R_X86_64_GOTPCRELX",
+                bits.R_X86_64_REX_GOTPCRELX => "R_X86_64_REX_GOTPCRELX",
+                bits.R_X86_64_NUM => "R_X86_64_NUM",
+                else => unreachable,
+            };
+            try writer.print("{x:0>12} {x:0>12} {s: <24} {x:0>16} {s} {d}\n", .{
+                reloc.r_offset,
+                reloc.r_info,
+                rel_type.*,
+                sym.st_value,
+                sym_name,
+                reloc.r_addend,
+            });
         }
+    }
+
+    if (!has_relocs) {
+        try writer.print("There is no relocation info in this file.", .{});
     }
 }
 
@@ -318,19 +407,19 @@ pub fn printSymtabs(self: Elf, writer: anytype) !void {
             defer self.allocator.free(sym_bind);
             const sym_vis = (&if (sym.st_other == 0) "DEFAULT" else "UNKNOWN").*;
             const sym_ndx = blk: {
-                if (SHN_LORESERVE <= sym.st_shndx and sym.st_shndx < SHN_HIRESERVE) {
-                    if (SHN_LOPROC <= sym.st_shndx and sym.st_shndx < SHN_HIPROC) {
-                        break :blk try fmt.allocPrint(self.allocator, "LO+{d}", .{sym.st_shndx - SHN_LOPROC});
+                if (bits.SHN_LORESERVE <= sym.st_shndx and sym.st_shndx < bits.SHN_HIRESERVE) {
+                    if (bits.SHN_LOPROC <= sym.st_shndx and sym.st_shndx < bits.SHN_HIPROC) {
+                        break :blk try fmt.allocPrint(self.allocator, "LO+{d}", .{sym.st_shndx - bits.SHN_LOPROC});
                     }
 
                     const sym_ndx = &switch (sym.st_shndx) {
-                        SHN_ABS => "ABS",
-                        SHN_COMMON => "COM",
-                        SHN_LIVEPATCH => "LIV",
+                        bits.SHN_ABS => "ABS",
+                        bits.SHN_COMMON => "COM",
+                        bits.SHN_LIVEPATCH => "LIV",
                         else => unreachable,
                     };
                     break :blk try self.allocator.dupe(u8, sym_ndx.*);
-                } else if (sym.st_shndx == SHN_UNDEF) {
+                } else if (sym.st_shndx == bits.SHN_UNDEF) {
                     break :blk try self.allocator.dupe(u8, "UND");
                 }
                 break :blk try fmt.allocPrint(self.allocator, "{d}", .{sym.st_shndx});
