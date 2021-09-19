@@ -22,8 +22,13 @@ shstrtab: std.ArrayListUnmanaged(u8) = .{},
 symtab: std.ArrayListUnmanaged(elf.Elf64_Sym) = .{},
 strtab: std.ArrayListUnmanaged(u8) = .{},
 
+dynsymtab: std.ArrayListUnmanaged(elf.Elf64_Sym) = .{},
+dynstrtab: std.ArrayListUnmanaged(u8) = .{},
+
 symtab_index: ?u16 = null,
 strtab_index: ?u16 = null,
+dynsymtab_index: ?u16 = null,
+dynstrtab_index: ?u16 = null,
 
 pub fn init(allocator: *Allocator, file: fs.File) Elf {
     return .{
@@ -38,6 +43,8 @@ pub fn deinit(self: *Elf) void {
     self.shstrtab.deinit(self.allocator);
     self.symtab.deinit(self.allocator);
     self.strtab.deinit(self.allocator);
+    self.dynsymtab.deinit(self.allocator);
+    self.dynstrtab.deinit(self.allocator);
 }
 
 pub fn parseMetadata(self: *Elf) !void {
@@ -57,6 +64,14 @@ pub fn parseMetadata(self: *Elf) !void {
                         return error.MultipleSymtabs;
                     }
                     self.symtab_index = ndx;
+                },
+                elf.SHT_DYNSYM => {
+                    if (self.dynsymtab_index != null) {
+                        // According to the UNIX System V release 4, there can only be one dynsym per ELF file.
+                        log.err("Two dynsyms detected in one file", .{});
+                        return error.MultipleDynsyms;
+                    }
+                    self.dynsymtab_index = ndx;
                 },
                 else => {},
             }
@@ -105,6 +120,41 @@ pub fn parseMetadata(self: *Elf) !void {
         var raw_strtab = try self.readShdrContents(shdr.sh_link);
         defer self.allocator.free(raw_strtab);
         try self.strtab.appendSlice(self.allocator, raw_strtab);
+    }
+
+    // Parse dynsymtab and matching dynstrtab
+    if (self.dynsymtab_index) |ndx| {
+        const shdr = self.shdrs.items[ndx];
+
+        var raw_dynsym = try self.readShdrContents(ndx);
+        defer self.allocator.free(raw_dynsym);
+
+        // TODO non-native endianness
+        if (self.header.is_64) {
+            const syms = @alignCast(@alignOf(elf.Elf64_Sym), mem.bytesAsSlice(elf.Elf64_Sym, raw_dynsym));
+            try self.dynsymtab.appendSlice(self.allocator, syms);
+        } else {
+            const nsyms = @divExact(shdr.sh_size, shdr.sh_entsize);
+            try self.dynsymtab.ensureUnusedCapacity(self.allocator, nsyms);
+            const syms = @alignCast(@alignOf(elf.Elf32_Sym), mem.bytesAsSlice(elf.Elf32_Sym, raw_dynsym));
+            for (syms) |sym| {
+                self.dynsymtab.appendAssumeCapacity(.{
+                    .st_name = sym.st_name,
+                    .st_info = sym.st_info,
+                    .st_other = sym.st_other,
+                    .st_shndx = sym.st_shndx,
+                    .st_value = sym.st_value,
+                    .st_size = sym.st_size,
+                });
+            }
+        }
+
+        self.dynstrtab_index = @intCast(u16, shdr.sh_link);
+        const strtab_shdr = self.shdrs.items[shdr.sh_link];
+
+        var raw_strtab = try self.readShdrContents(shdr.sh_link);
+        defer self.allocator.free(raw_strtab);
+        try self.dynstrtab.appendSlice(self.allocator, raw_strtab);
     }
 }
 
@@ -280,8 +330,15 @@ pub fn printRelocs(self: Elf, writer: anytype) !void {
 
         for (relocs) |reloc| {
             const r_sym = reloc.r_info >> 32;
-            const sym = self.symtab.items[r_sym];
-            const sym_name = self.getString(sym.st_name);
+            var sym: elf.Elf64_Sym = undefined;
+            var sym_name: []const u8 = undefined;
+            if (self.symtab_index != null and shdr.sh_link == self.symtab_index.?) {
+                sym = self.symtab.items[r_sym];
+                sym_name = getString(self.strtab.items, sym.st_name);
+            } else if (self.dynsymtab_index != null and shdr.sh_link == self.dynsymtab_index.?) {
+                sym = self.dynsymtab.items[r_sym];
+                sym_name = getString(self.dynstrtab.items, sym.st_name);
+            } else unreachable;
             const r_type = @truncate(u32, reloc.r_info);
             const rel_type = &switch (r_type) {
                 bits.R_X86_64_NONE => "R_X86_64_NONE",
@@ -341,28 +398,39 @@ pub fn printRelocs(self: Elf, writer: anytype) !void {
     }
 
     if (!has_relocs) {
-        try writer.print("There is no relocation info in this file.", .{});
+        try writer.print("There is no relocation info in this file.\n", .{});
     }
 }
 
 pub fn printSymtabs(self: Elf, writer: anytype) !void {
-    if (self.symtab_index == null) {
+    if (self.symtab_index == null and self.dynsymtab_index == null) {
         try writer.print("There is no symbol table in this file.", .{});
+        return;
     }
+    if (self.symtab_index) |ndx| {
+        try self.printSymtab(ndx, self.symtab.items, self.strtab.items, writer);
+        try writer.print("\n", .{});
+    }
+    if (self.dynsymtab_index) |ndx| {
+        try self.printSymtab(ndx, self.dynsymtab.items, self.dynstrtab.items, writer);
+        try writer.print("\n", .{});
+    }
+}
 
-    const shdr = self.shdrs.items[self.symtab_index.?];
+fn printSymtab(self: Elf, shdr_ndx: u16, symtab: []const elf.Elf64_Sym, strtab: []const u8, writer: anytype) !void {
+    const shdr = self.shdrs.items[shdr_ndx];
 
     try writer.print("Symbol table '{s}' contains {d} entries:\n", .{
         self.getShString(shdr.sh_name),
-        self.symtab.items.len,
+        symtab.len,
     });
     try writer.print(
         "  Num:{s: <12}Value{s: <2}Size Type{s: <3} Bind{s: <2} Vis{s: <5} Ndx{s: <2} Name\n",
         .{ "", "", "", "", "", "" },
     );
 
-    for (self.symtab.items) |sym, i| {
-        const sym_name = self.getString(sym.st_name);
+    for (symtab) |sym, i| {
+        const sym_name = getString(strtab, sym.st_name);
         const sym_type = blk: {
             const tt = sym.st_info & 0xf;
             if (elf.STT_LOPROC <= tt and tt < elf.STT_HIPROC) {
@@ -435,9 +503,9 @@ fn getShString(self: Elf, off: u32) []const u8 {
     return mem.spanZ(@ptrCast([*:0]const u8, self.shstrtab.items.ptr + off));
 }
 
-fn getString(self: Elf, off: u32) []const u8 {
-    assert(off < self.strtab.items.len);
-    return mem.spanZ(@ptrCast([*:0]const u8, self.strtab.items.ptr + off));
+fn getString(strtab: []const u8, off: u32) []const u8 {
+    assert(off < strtab.len);
+    return mem.spanZ(@ptrCast([*:0]const u8, strtab.ptr + off));
 }
 
 fn readShdrContents(self: Elf, shdr_index: u32) ![]u8 {
