@@ -16,12 +16,14 @@ file: fs.File,
 
 header: elf.Header = undefined,
 shdrs: std.ArrayListUnmanaged(elf.Elf64_Shdr) = .{},
-phds: std.ArrayListUnmanaged(elf.Elf64_Phdr) = .{},
+phdrs: std.ArrayListUnmanaged(elf.Elf64_Phdr) = .{},
+shstrtab: std.ArrayListUnmanaged(u8) = .{},
 
 symtab: std.ArrayListUnmanaged(elf.Elf64_Sym) = .{},
 strtab: std.ArrayListUnmanaged(u8) = .{},
-symtab_offsets: std.AutoHashMapUnmanaged(u16, u32) = .{},
-strtab_offsets: std.AutoHashMapUnmanaged(u16, u32) = .{},
+
+symtab_index: ?u16 = null,
+strtab_index: ?u16 = null,
 
 pub fn init(allocator: *Allocator, file: fs.File) Elf {
     return .{
@@ -32,10 +34,10 @@ pub fn init(allocator: *Allocator, file: fs.File) Elf {
 
 pub fn deinit(self: *Elf) void {
     self.shdrs.deinit(self.allocator);
+    self.phdrs.deinit(self.allocator);
+    self.shstrtab.deinit(self.allocator);
     self.symtab.deinit(self.allocator);
     self.strtab.deinit(self.allocator);
-    self.symtab_offsets.deinit(self.allocator);
-    self.strtab_offsets.deinit(self.allocator);
 }
 
 pub fn parseMetadata(self: *Elf) !void {
@@ -45,49 +47,64 @@ pub fn parseMetadata(self: *Elf) !void {
     {
         try self.shdrs.ensureTotalCapacity(self.allocator, self.header.shnum);
         var it = self.header.section_header_iterator(self.file);
+        var ndx: u16 = 0;
         while (try it.next()) |shdr| {
+            switch (shdr.sh_type) {
+                elf.SHT_SYMTAB => {
+                    if (self.symtab_index != null) {
+                        // According to the UNIX System V release 4, there can only be one symtab per ELF file.
+                        log.err("Two symtabs detected in one file", .{});
+                        return error.MultipleSymtabs;
+                    }
+                    self.symtab_index = ndx;
+                },
+                else => {},
+            }
             self.shdrs.appendAssumeCapacity(shdr);
+            ndx += 1;
         }
     }
 
-    // Parse symtabs and strtabs
-    for (self.shdrs.items) |shdr, i| {
-        if (shdr.sh_type != elf.SHT_SYMTAB and shdr.sh_type != elf.SHT_STRTAB) continue;
-
-        const ndx = @intCast(u16, i);
-        var buffer = try self.readShdrContents(@intCast(u16, ndx));
+    // Parse shstrtab
+    {
+        var buffer = try self.readShdrContents(self.header.shstrndx);
         defer self.allocator.free(buffer);
+        try self.shstrtab.appendSlice(self.allocator, buffer);
+    }
 
-        if (shdr.sh_type == elf.SHT_SYMTAB) {
-            const nsyms = @divExact(shdr.sh_size, shdr.sh_entsize);
-            const off = @intCast(u32, self.symtab.items.len);
+    // Parse symtab and matching strtab
+    if (self.symtab_index) |ndx| {
+        const shdr = self.shdrs.items[ndx];
 
-            if (self.header.is_64) {
-                // TODO non-native endianness
-                const syms = @alignCast(@alignOf(elf.Elf64_Sym), mem.bytesAsSlice(elf.Elf64_Sym, buffer));
-                try self.symtab.appendSlice(self.allocator, syms);
-            } else {
-                try self.symtab.ensureUnusedCapacity(self.allocator, nsyms);
-                // TODO non-native endianness
-                const syms = @alignCast(@alignOf(elf.Elf32_Sym), mem.bytesAsSlice(elf.Elf32_Sym, buffer));
-                for (syms) |sym| {
-                    self.symtab.appendAssumeCapacity(.{
-                        .st_name = sym.st_name,
-                        .st_info = sym.st_info,
-                        .st_other = sym.st_other,
-                        .st_shndx = sym.st_shndx,
-                        .st_value = sym.st_value,
-                        .st_size = sym.st_size,
-                    });
-                }
-            }
+        var raw_symtab = try self.readShdrContents(ndx);
+        defer self.allocator.free(raw_symtab);
 
-            try self.symtab_offsets.putNoClobber(self.allocator, ndx, off);
+        // TODO non-native endianness
+        if (self.header.is_64) {
+            const syms = @alignCast(@alignOf(elf.Elf64_Sym), mem.bytesAsSlice(elf.Elf64_Sym, raw_symtab));
+            try self.symtab.appendSlice(self.allocator, syms);
         } else {
-            const off = @intCast(u32, self.strtab.items.len);
-            try self.strtab.appendSlice(self.allocator, buffer);
-            try self.strtab_offsets.putNoClobber(self.allocator, ndx, off);
+            const nsyms = @divExact(shdr.sh_size, shdr.sh_entsize);
+            try self.symtab.ensureUnusedCapacity(self.allocator, nsyms);
+            const syms = @alignCast(@alignOf(elf.Elf32_Sym), mem.bytesAsSlice(elf.Elf32_Sym, raw_symtab));
+            for (syms) |sym| {
+                self.symtab.appendAssumeCapacity(.{
+                    .st_name = sym.st_name,
+                    .st_info = sym.st_info,
+                    .st_other = sym.st_other,
+                    .st_shndx = sym.st_shndx,
+                    .st_value = sym.st_value,
+                    .st_size = sym.st_size,
+                });
+            }
         }
+
+        self.strtab_index = @intCast(u16, shdr.sh_link);
+        const strtab_shdr = self.shdrs.items[shdr.sh_link];
+
+        var raw_strtab = try self.readShdrContents(shdr.sh_link);
+        defer self.allocator.free(raw_strtab);
+        try self.strtab.appendSlice(self.allocator, raw_strtab);
     }
 }
 
@@ -121,7 +138,7 @@ pub fn printShdrs(self: Elf, writer: anytype) !void {
     try writer.print("  [Nr]  Name{s: <14}Type{s: <14}Address{s: <11}Offset\n", .{ "", "", "" });
     try writer.print("        Size{s: <14}EntSize{s: <11}Flags  Link  Info  Align\n", .{ "", "" });
     for (self.shdrs.items) |shdr, i| {
-        const sh_name = self.getString(self.header.shstrndx, shdr.sh_name);
+        const sh_name = self.getShString(shdr.sh_name);
         const sh_type = blk: {
             if (elf.SHT_LOOS <= shdr.sh_type and shdr.sh_type < elf.SHT_HIOS) {
                 break :blk try fmt.allocPrint(self.allocator, "LOOS+0x{x}", .{shdr.sh_type - elf.SHT_LOOS});
@@ -214,7 +231,6 @@ pub fn printRelocs(self: Elf, writer: anytype) !void {
 
         has_relocs = true;
         const symtab_shdr = self.shdrs.items[shdr.sh_link];
-        const symtab = self.getSymtab(@intCast(u16, shdr.sh_link));
 
         var buffer = try self.readShdrContents(@intCast(u16, i));
         defer self.allocator.free(buffer);
@@ -253,7 +269,7 @@ pub fn printRelocs(self: Elf, writer: anytype) !void {
         }
 
         try writer.print("Relocation section '{s}' at offset 0x{x} contains {d} entries:\n", .{
-            self.getString(self.header.shstrndx, shdr.sh_name),
+            self.getShString(shdr.sh_name),
             shdr.sh_offset,
             nrelocs,
         });
@@ -264,8 +280,8 @@ pub fn printRelocs(self: Elf, writer: anytype) !void {
 
         for (relocs) |reloc| {
             const r_sym = reloc.r_info >> 32;
-            const sym = symtab[r_sym];
-            const sym_name = self.getString(@intCast(u16, symtab_shdr.sh_link), sym.st_name);
+            const sym = self.symtab.items[r_sym];
+            const sym_name = self.getString(sym.st_name);
             const r_type = @truncate(u32, reloc.r_info);
             const rel_type = &switch (r_type) {
                 bits.R_X86_64_NONE => "R_X86_64_NONE",
@@ -321,6 +337,7 @@ pub fn printRelocs(self: Elf, writer: anytype) !void {
                 reloc.r_addend,
             });
         }
+        try writer.print("\n", .{});
     }
 
     if (!has_relocs) {
@@ -329,111 +346,101 @@ pub fn printRelocs(self: Elf, writer: anytype) !void {
 }
 
 pub fn printSymtabs(self: Elf, writer: anytype) !void {
-    var has_symtab = false;
-    for (self.shdrs.items) |shdr, ndx| {
-        if (shdr.sh_type != elf.SHT_SYMTAB) continue;
-
-        has_symtab = true;
-        const symtab = self.getSymtab(@intCast(u16, ndx));
-
-        try writer.print("Symbol table '{s}' contains {d} entries:\n", .{
-            self.getString(self.header.shstrndx, shdr.sh_name),
-            symtab.len,
-        });
-        try writer.print(
-            "  Num:{s: <12}Value{s: <2}Size Type{s: <3} Bind{s: <2} Vis{s: <5} Ndx{s: <2} Name\n",
-            .{ "", "", "", "", "", "" },
-        );
-
-        for (symtab) |sym, i| {
-            const sym_name = self.getString(@intCast(u16, shdr.sh_link), sym.st_name);
-            const sym_type = blk: {
-                const tt = sym.st_info & 0xf;
-                if (elf.STT_LOPROC <= tt and tt < elf.STT_HIPROC) {
-                    break :blk try fmt.allocPrint(self.allocator, "LOPROC+{d}", .{tt - elf.STT_LOPROC});
-                }
-                if (elf.STT_LOOS <= tt and tt < elf.STT_HIOS) {
-                    break :blk try fmt.allocPrint(self.allocator, "LOOS+{d}", .{tt - elf.STT_LOOS});
-                }
-                const sym_type = &switch (tt) {
-                    elf.STT_NOTYPE => "NOTYPE",
-                    elf.STT_OBJECT => "OBJECT",
-                    elf.STT_FUNC => "FUNC",
-                    elf.STT_SECTION => "SECTION",
-                    elf.STT_FILE => "FILE",
-                    elf.STT_COMMON => "COMMON",
-                    elf.STT_TLS => "TLS",
-                    elf.STT_NUM => "NUM",
-                    else => "UNKNOWN",
-                };
-                break :blk try self.allocator.dupe(u8, sym_type.*);
-            };
-            defer self.allocator.free(sym_type);
-            const sym_bind = blk: {
-                const bind = sym.st_info >> 4;
-                if (elf.STB_LOPROC <= bind and bind < elf.STB_HIPROC) {
-                    break :blk try fmt.allocPrint(self.allocator, "LOPROC+{d}", .{bind - elf.STB_LOPROC});
-                }
-                if (elf.STB_LOOS <= bind and bind < elf.STB_HIOS) {
-                    break :blk try fmt.allocPrint(self.allocator, "LOOS+{d}", .{bind - elf.STB_LOOS});
-                }
-                const sym_bind = &switch (bind) {
-                    elf.STB_LOCAL => "LOCAL",
-                    elf.STB_GLOBAL => "GLOBAL",
-                    elf.STB_WEAK => "WEAK",
-                    elf.STB_NUM => "NUM",
-                    else => "UNKNOWN",
-                };
-                break :blk try self.allocator.dupe(u8, sym_bind.*);
-            };
-            defer self.allocator.free(sym_bind);
-            const sym_vis = (&if (sym.st_other == 0) "DEFAULT" else "UNKNOWN").*;
-            const sym_ndx = blk: {
-                if (bits.SHN_LORESERVE <= sym.st_shndx and sym.st_shndx < bits.SHN_HIRESERVE) {
-                    if (bits.SHN_LOPROC <= sym.st_shndx and sym.st_shndx < bits.SHN_HIPROC) {
-                        break :blk try fmt.allocPrint(self.allocator, "LO+{d}", .{sym.st_shndx - bits.SHN_LOPROC});
-                    }
-
-                    const sym_ndx = &switch (sym.st_shndx) {
-                        bits.SHN_ABS => "ABS",
-                        bits.SHN_COMMON => "COM",
-                        bits.SHN_LIVEPATCH => "LIV",
-                        else => "UNK",
-                    };
-                    break :blk try self.allocator.dupe(u8, sym_ndx.*);
-                } else if (sym.st_shndx == bits.SHN_UNDEF) {
-                    break :blk try self.allocator.dupe(u8, "UND");
-                }
-                break :blk try fmt.allocPrint(self.allocator, "{d}", .{sym.st_shndx});
-            };
-            defer self.allocator.free(sym_ndx);
-            try writer.print(
-                "  {d: >3}: {x:0<16} {d: >5} {s: <7} {s: <6} {s: <8} {s: <5} {s}\n",
-                .{ i, sym.st_value, sym.st_size, sym_type, sym_bind, sym_vis, sym_ndx, sym_name },
-            );
-        }
-    }
-
-    if (!has_symtab) {
+    if (self.symtab_index == null) {
         try writer.print("There is no symbol table in this file.", .{});
     }
+
+    const shdr = self.shdrs.items[self.symtab_index.?];
+
+    try writer.print("Symbol table '{s}' contains {d} entries:\n", .{
+        self.getShString(shdr.sh_name),
+        self.symtab.items.len,
+    });
+    try writer.print(
+        "  Num:{s: <12}Value{s: <2}Size Type{s: <3} Bind{s: <2} Vis{s: <5} Ndx{s: <2} Name\n",
+        .{ "", "", "", "", "", "" },
+    );
+
+    for (self.symtab.items) |sym, i| {
+        const sym_name = self.getString(sym.st_name);
+        const sym_type = blk: {
+            const tt = sym.st_info & 0xf;
+            if (elf.STT_LOPROC <= tt and tt < elf.STT_HIPROC) {
+                break :blk try fmt.allocPrint(self.allocator, "LOPROC+{d}", .{tt - elf.STT_LOPROC});
+            }
+            if (elf.STT_LOOS <= tt and tt < elf.STT_HIOS) {
+                break :blk try fmt.allocPrint(self.allocator, "LOOS+{d}", .{tt - elf.STT_LOOS});
+            }
+            const sym_type = &switch (tt) {
+                elf.STT_NOTYPE => "NOTYPE",
+                elf.STT_OBJECT => "OBJECT",
+                elf.STT_FUNC => "FUNC",
+                elf.STT_SECTION => "SECTION",
+                elf.STT_FILE => "FILE",
+                elf.STT_COMMON => "COMMON",
+                elf.STT_TLS => "TLS",
+                elf.STT_NUM => "NUM",
+                else => "UNKNOWN",
+            };
+            break :blk try self.allocator.dupe(u8, sym_type.*);
+        };
+        defer self.allocator.free(sym_type);
+        const sym_bind = blk: {
+            const bind = sym.st_info >> 4;
+            if (elf.STB_LOPROC <= bind and bind < elf.STB_HIPROC) {
+                break :blk try fmt.allocPrint(self.allocator, "LOPROC+{d}", .{bind - elf.STB_LOPROC});
+            }
+            if (elf.STB_LOOS <= bind and bind < elf.STB_HIOS) {
+                break :blk try fmt.allocPrint(self.allocator, "LOOS+{d}", .{bind - elf.STB_LOOS});
+            }
+            const sym_bind = &switch (bind) {
+                elf.STB_LOCAL => "LOCAL",
+                elf.STB_GLOBAL => "GLOBAL",
+                elf.STB_WEAK => "WEAK",
+                elf.STB_NUM => "NUM",
+                else => "UNKNOWN",
+            };
+            break :blk try self.allocator.dupe(u8, sym_bind.*);
+        };
+        defer self.allocator.free(sym_bind);
+        const sym_vis = (&if (sym.st_other == 0) "DEFAULT" else "UNKNOWN").*;
+        const sym_ndx = blk: {
+            if (bits.SHN_LORESERVE <= sym.st_shndx and sym.st_shndx < bits.SHN_HIRESERVE) {
+                if (bits.SHN_LOPROC <= sym.st_shndx and sym.st_shndx < bits.SHN_HIPROC) {
+                    break :blk try fmt.allocPrint(self.allocator, "LO+{d}", .{sym.st_shndx - bits.SHN_LOPROC});
+                }
+
+                const sym_ndx = &switch (sym.st_shndx) {
+                    bits.SHN_ABS => "ABS",
+                    bits.SHN_COMMON => "COM",
+                    bits.SHN_LIVEPATCH => "LIV",
+                    else => "UNK",
+                };
+                break :blk try self.allocator.dupe(u8, sym_ndx.*);
+            } else if (sym.st_shndx == bits.SHN_UNDEF) {
+                break :blk try self.allocator.dupe(u8, "UND");
+            }
+            break :blk try fmt.allocPrint(self.allocator, "{d}", .{sym.st_shndx});
+        };
+        defer self.allocator.free(sym_ndx);
+        try writer.print(
+            "  {d: >3}: {x:0<16} {d: >5} {s: <7} {s: <6} {s: <8} {s: <5} {s}\n",
+            .{ i, sym.st_value, sym.st_size, sym_type, sym_bind, sym_vis, sym_ndx, sym_name },
+        );
+    }
 }
 
-fn getString(self: Elf, shdr_ndx: u16, off: u32) []const u8 {
-    const actual_off = self.strtab_offsets.get(shdr_ndx).? + off;
-    assert(actual_off < self.strtab.items.len);
-    return mem.spanZ(@ptrCast([*:0]const u8, self.strtab.items.ptr + actual_off));
+fn getShString(self: Elf, off: u32) []const u8 {
+    assert(off < self.shstrtab.items.len);
+    return mem.spanZ(@ptrCast([*:0]const u8, self.shstrtab.items.ptr + off));
 }
 
-fn getSymtab(self: Elf, shdr_ndx: u16) []const elf.Elf64_Sym {
-    const shdr = self.shdrs.items[shdr_ndx];
-    const nsyms = @divExact(shdr.sh_size, shdr.sh_entsize);
-    const start_ndx = self.symtab_offsets.get(shdr_ndx).?;
-    assert(start_ndx < self.symtab.items.len);
-    return self.symtab.items[start_ndx..][0..nsyms];
+fn getString(self: Elf, off: u32) []const u8 {
+    assert(off < self.strtab.items.len);
+    return mem.spanZ(@ptrCast([*:0]const u8, self.strtab.items.ptr + off));
 }
 
-fn readShdrContents(self: Elf, shdr_index: u16) ![]u8 {
+fn readShdrContents(self: Elf, shdr_index: u32) ![]u8 {
     const shdr = self.shdrs.items[shdr_index];
     var buffer = try self.allocator.alloc(u8, shdr.sh_size);
     const amt = try self.file.preadAll(buffer, shdr.sh_offset);
