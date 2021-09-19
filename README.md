@@ -5,10 +5,11 @@ Zig's ELF parsing utility - a replacement (maybe someday) utility for `readelf` 
 ## Usage
 
 ```
-zelf [-ahSsr] [--help] <FILE>
+zelf [-ahlSsr] [--help] <FILE>
             --help              Display this help and exit
         -a, --all               Equivalent to having all flags on
         -h, --file-header       Display the ELF file header
+        -l, --program-headers   Display the programs' headers
         -S, --section-headers   Display the sections' header
         -s, --symbols           Display the symbol table
         -r, --relocs            Display the relocations (if present)
