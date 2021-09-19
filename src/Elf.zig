@@ -16,6 +16,7 @@ file: fs.File,
 
 header: elf.Header = undefined,
 shdrs: std.ArrayListUnmanaged(elf.Elf64_Shdr) = .{},
+phds: std.ArrayListUnmanaged(elf.Elf64_Phdr) = .{},
 
 symtab: std.ArrayListUnmanaged(elf.Elf64_Sym) = .{},
 strtab: std.ArrayListUnmanaged(u8) = .{},
@@ -149,7 +150,7 @@ pub fn printShdrs(self: Elf, writer: anytype) !void {
                 elf.SHT_PREINIT_ARRAY => "PREINIT_ARRAY",
                 elf.SHT_GROUP => "GROUP",
                 elf.SHT_SYMTAB_SHNDX => "SYMTAB_SHNDX",
-                else => unreachable,
+                else => "UNKNOWN",
             };
             break :blk try self.allocator.dupe(u8, sh_type.*);
         };
@@ -309,7 +310,7 @@ pub fn printRelocs(self: Elf, writer: anytype) !void {
                 bits.R_X86_64_GOTPCRELX => "R_X86_64_GOTPCRELX",
                 bits.R_X86_64_REX_GOTPCRELX => "R_X86_64_REX_GOTPCRELX",
                 bits.R_X86_64_NUM => "R_X86_64_NUM",
-                else => unreachable,
+                else => "UNKNOWN",
             };
             try writer.print("{x:0>12} {x:0>12} {s: <24} {x:0>16} {s} {d}\n", .{
                 reloc.r_offset,
@@ -363,7 +364,7 @@ pub fn printSymtabs(self: Elf, writer: anytype) !void {
                     elf.STT_COMMON => "COMMON",
                     elf.STT_TLS => "TLS",
                     elf.STT_NUM => "NUM",
-                    else => unreachable,
+                    else => "UNKNOWN",
                 };
                 break :blk try self.allocator.dupe(u8, sym_type.*);
             };
@@ -381,7 +382,7 @@ pub fn printSymtabs(self: Elf, writer: anytype) !void {
                     elf.STB_GLOBAL => "GLOBAL",
                     elf.STB_WEAK => "WEAK",
                     elf.STB_NUM => "NUM",
-                    else => unreachable,
+                    else => "UNKNOWN",
                 };
                 break :blk try self.allocator.dupe(u8, sym_bind.*);
             };
@@ -397,7 +398,7 @@ pub fn printSymtabs(self: Elf, writer: anytype) !void {
                         bits.SHN_ABS => "ABS",
                         bits.SHN_COMMON => "COM",
                         bits.SHN_LIVEPATCH => "LIV",
-                        else => unreachable,
+                        else => "UNK",
                     };
                     break :blk try self.allocator.dupe(u8, sym_ndx.*);
                 } else if (sym.st_shndx == bits.SHN_UNDEF) {
