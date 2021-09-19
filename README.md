@@ -5,12 +5,13 @@ Zig's ELF parsing utility - a replacement (maybe someday) utility for `readelf` 
 ## Usage
 
 ```
-zelf [-hS] [--help] <FILE>
+zelf [-ahSsr] [--help] <FILE>
             --help              Display this help and exit
         -a, --all               Equivalent to having all flags on
         -h, --file-header       Display the ELF file header
         -S, --section-headers   Display the sections' header
         -s, --symbols           Display the symbol table
+        -r, --relocs            Display the relocations (if present)
 ```
 
 Currently supported flags. More to come.
@@ -58,15 +59,21 @@ Section Headers:
   [ 9]  .strtab           STRTAB            0000000000000000  000000000000022a
         0000000000000022  0000000000000000            0     0     1
 
+Relocation section '.rela.text' at offset 0x78 contains 3 entries:
+  Offset        Info            Type                    Sym. Value  Sym. Name + Addend
+000000000004 00090000002a R_X86_64_REX_GOTPCRELX   0000000000000000 stderr -4
+00000000000e 000200000002 R_X86_64_PC32            0000000000000000 .L.str -4
+00000000001d 000700000004 R_X86_64_PLT32           0000000000000000 fwrite -4
+
 Symbol table '.symtab' contains 10 entries:
   Num:            Value  Size Type    Bind   Vis      Ndx   Name
-    0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND
+    0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND   
     1: 0000000000000000     0 FILE    LOCAL  DEFAULT  ABS   main.c
     2: 0000000000000000    15 OBJECT  LOCAL  DEFAULT  3     .L.str
-    3: 0000000000000000     0 SECTION LOCAL  DEFAULT  1
-    4: 0000000000000000     0 SECTION LOCAL  DEFAULT  5
-    5: 0000000000000000     0 SECTION LOCAL  DEFAULT  3
-    6: 0000000000000000     0 SECTION LOCAL  DEFAULT  4
+    3: 0000000000000000     0 SECTION LOCAL  DEFAULT  1     
+    4: 0000000000000000     0 SECTION LOCAL  DEFAULT  5     
+    5: 0000000000000000     0 SECTION LOCAL  DEFAULT  3     
+    6: 0000000000000000     0 SECTION LOCAL  DEFAULT  4     
     7: 0000000000000000     0 NOTYPE  GLOBAL DEFAULT  UND   fwrite
     8: 0000000000000000    37 FUNC    GLOBAL DEFAULT  1     main
     9: 0000000000000000     0 NOTYPE  GLOBAL DEFAULT  UND   stderr
