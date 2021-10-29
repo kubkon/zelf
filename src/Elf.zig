@@ -124,8 +124,6 @@ pub fn parseMetadata(self: *Elf) !void {
         }
 
         self.strtab_index = @intCast(u16, shdr.sh_link);
-        const strtab_shdr = self.shdrs.items[shdr.sh_link];
-
         var raw_strtab = try self.readShdrContents(shdr.sh_link);
         defer self.allocator.free(raw_strtab);
         try self.strtab.appendSlice(self.allocator, raw_strtab);
@@ -159,8 +157,6 @@ pub fn parseMetadata(self: *Elf) !void {
         }
 
         self.dynstrtab_index = @intCast(u16, shdr.sh_link);
-        const strtab_shdr = self.shdrs.items[shdr.sh_link];
-
         var raw_strtab = try self.readShdrContents(shdr.sh_link);
         defer self.allocator.free(raw_strtab);
         try self.dynstrtab.appendSlice(self.allocator, raw_strtab);
@@ -400,7 +396,6 @@ pub fn printRelocs(self: Elf, writer: anytype) !void {
         }
 
         has_relocs = true;
-        const symtab_shdr = self.shdrs.items[shdr.sh_link];
 
         var buffer = try self.readShdrContents(@intCast(u16, i));
         defer self.allocator.free(buffer);
@@ -412,10 +407,36 @@ pub fn printRelocs(self: Elf, writer: anytype) !void {
         if (self.header.is_64) {
             // TODO non-native endianness
             if (shdr.sh_type == elf.SHT_REL) {
+                var code = try self.readShdrContents(shdr.sh_info);
+                defer self.allocator.free(code);
+
                 const slice = @alignCast(
                     @alignOf(elf.Elf64_Rel),
                     mem.bytesAsSlice(elf.Elf64_Rel, buffer),
                 );
+                // Parse relocs addend from inst and convert into Elf64_Rela
+                for (slice) |rel, rel_i| {
+                    var out_rel = elf.Elf64_Rela{
+                        .r_offset = rel.r_offset,
+                        .r_info = rel.r_info,
+                        .r_addend = 0,
+                    };
+                    const r_addend: i64 = addend: {
+                        switch (out_rel.r_type()) {
+                            elf.R_X86_64_64 => {
+                                const in_inst = code[out_rel.r_offset..][0..8];
+                                break :addend mem.readIntSliceLittle(i64, in_inst);
+                            },
+                            elf.R_X86_64_32 => {
+                                const in_inst = code[out_rel.r_offset..][0..4];
+                                break :addend mem.readIntSliceLittle(i32, in_inst);
+                            },
+                            else => break :addend 0, // TODO
+                        }
+                    };
+                    out_rel.r_addend = r_addend;
+                    relocs[rel_i] = out_rel;
+                }
             } else {
                 const slice = @alignCast(
                     @alignOf(elf.Elf64_Rela),
@@ -426,12 +447,12 @@ pub fn printRelocs(self: Elf, writer: anytype) !void {
         } else {
             // TODO non-native endianness
             if (shdr.sh_type == elf.SHT_REL) {
-                const slice = @alignCast(
+                _ = @alignCast(
                     @alignOf(elf.Elf32_Rel),
                     mem.bytesAsSlice(elf.Elf32_Rel, buffer),
                 );
             } else {
-                const slice = @alignCast(
+                _ = @alignCast(
                     @alignOf(elf.Elf32_Rela),
                     mem.bytesAsSlice(elf.Elf32_Rela, buffer),
                 );
