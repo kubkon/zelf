@@ -5,7 +5,7 @@ const fs = std.fs;
 const Elf = @import("Elf.zig");
 
 var global_alloc = std.heap.GeneralPurposeAllocator(.{}){};
-const gpa = &global_alloc.allocator;
+const gpa = global_alloc.allocator();
 
 pub fn main() anyerror!void {
     const stderr = std.io.getStdErr().writer();
@@ -22,19 +22,25 @@ pub fn main() anyerror!void {
         clap.parseParam("<FILE>") catch unreachable,
     };
 
-    var args = try clap.parse(clap.Help, &params, .{});
-    defer args.deinit();
+    const parsers = comptime .{
+        .FILE = clap.parsers.string,
+    };
 
-    if (args.flag("--help")) {
+    var res = try clap.parse(clap.Help, &params, parsers, .{
+        .allocator = gpa,
+        .diagnostic = null,
+    });
+    defer res.deinit();
+
+    if (res.args.help) {
         return printUsageWithHelp(&params, stderr);
     }
 
-    const positionals = args.positionals();
-    if (positionals.len == 0) {
+    if (res.positionals.len == 0) {
         return stderr.print("missing positional argument <FILE>...\n", .{});
     }
 
-    const filename = positionals[0];
+    const filename = res.positionals[0];
     const file = try fs.cwd().openFile(filename, .{});
     defer file.close();
 
@@ -42,7 +48,7 @@ pub fn main() anyerror!void {
     defer elf.deinit();
     try elf.parseMetadata();
 
-    if (args.flag("--all")) {
+    if (res.args.all) {
         try elf.printHeader(stdout);
         try stdout.writeAll("\n");
         try elf.printShdrs(stdout);
@@ -52,15 +58,15 @@ pub fn main() anyerror!void {
         try elf.printRelocs(stdout);
         try stdout.writeAll("\n");
         try elf.printSymtabs(stdout);
-    } else if (args.flag("--file-header")) {
+    } else if (res.args.@"file-header") {
         try elf.printHeader(stdout);
-    } else if (args.flag("--section-headers")) {
+    } else if (res.args.@"section-headers") {
         try elf.printShdrs(stdout);
-    } else if (args.flag("--program-headers")) {
+    } else if (res.args.@"program-headers") {
         try elf.printPhdrs(stdout);
-    } else if (args.flag("--relocs")) {
+    } else if (res.args.relocs) {
         try elf.printRelocs(stdout);
-    } else if (args.flag("--symbols")) {
+    } else if (res.args.symbols) {
         try elf.printSymtabs(stdout);
     } else {
         return printUsageWithHelp(&params, stderr);
@@ -69,7 +75,7 @@ pub fn main() anyerror!void {
 
 fn printUsageWithHelp(comptime params: []const clap.Param(clap.Help), writer: anytype) !void {
     try writer.print("zelf ", .{});
-    try clap.usage(writer, params);
+    try clap.usage(writer, clap.Help, params);
     try writer.print("\n", .{});
-    try clap.help(writer, params);
+    try clap.help(writer, clap.Help, params, .{});
 }
