@@ -197,7 +197,7 @@ pub fn printShdrs(self: Elf, writer: anytype) !void {
     defer arena_allocator.deinit();
     const arena = arena_allocator.allocator();
 
-    for (self.shdrs.items) |shdr, i| {
+    for (self.shdrs.items, 0..) |shdr, i| {
         const sh_name = self.getShString(shdr.sh_name);
         const sh_type = switch (shdr.sh_type) {
             elf.SHT_NULL => "NULL",
@@ -297,11 +297,11 @@ pub fn printPhdrs(self: Elf, writer: anytype) !void {
     const arena = arena_allocator.allocator();
 
     var section_to_segment = try arena.alloc(std.ArrayList(usize), self.phdrs.items.len);
-    for (self.phdrs.items) |_, i| {
+    for (self.phdrs.items, 0..) |_, i| {
         section_to_segment[i] = std.ArrayList(usize).init(arena);
     }
 
-    for (self.phdrs.items) |phdr, i| {
+    for (self.phdrs.items, 0..) |phdr, i| {
         const p_type = switch (phdr.p_type) {
             elf.PT_NULL => "NULL",
             elf.PT_LOAD => "LOAD",
@@ -360,7 +360,7 @@ pub fn printPhdrs(self: Elf, writer: anytype) !void {
 
         const start_addr = phdr.p_vaddr;
         const end_addr = start_addr + phdr.p_memsz;
-        for (self.shdrs.items) |shdr, j| {
+        for (self.shdrs.items, 0..) |shdr, j| {
             if (start_addr <= shdr.sh_addr and shdr.sh_addr < end_addr) {
                 try section_to_segment[i].append(j);
             }
@@ -371,10 +371,10 @@ pub fn printPhdrs(self: Elf, writer: anytype) !void {
     try writer.print(" Section to Segment mapping:\n", .{});
     try writer.print("  Segment Sections...\n", .{});
 
-    for (section_to_segment) |ss, i| {
+    for (section_to_segment, 0..) |ss, i| {
         try writer.print("   {d:0>2}     ", .{i});
 
-        for (ss.items) |shdr_ndx, x| {
+        for (ss.items, 0..) |shdr_ndx, x| {
             const shdr = self.shdrs.items[shdr_ndx];
             const shdr_name = self.getShString(shdr.sh_name);
             try writer.print("{s}", .{shdr_name});
@@ -389,7 +389,7 @@ pub fn printPhdrs(self: Elf, writer: anytype) !void {
 
 pub fn printRelocs(self: Elf, writer: anytype) !void {
     var has_relocs = false;
-    for (self.shdrs.items) |shdr, i| {
+    for (self.shdrs.items, 0..) |shdr, i| {
         switch (shdr.sh_type) {
             elf.SHT_REL, elf.SHT_RELA => {},
             else => continue,
@@ -412,7 +412,7 @@ pub fn printRelocs(self: Elf, writer: anytype) !void {
 
                 const slice = @alignCast(@alignOf(elf.Elf64_Rel), mem.bytesAsSlice(elf.Elf64_Rel, buffer));
                 // Parse relocs addend from inst and convert into Elf64_Rela
-                for (slice) |rel, rel_i| {
+                for (slice, 0..) |rel, rel_i| {
                     var out_rel = elf.Elf64_Rela{
                         .r_offset = rel.r_offset,
                         .r_info = rel.r_info,
@@ -562,7 +562,7 @@ fn printSymtab(self: Elf, shdr_ndx: u16, symtab: []const elf.Elf64_Sym, strtab: 
     defer arena_allocator.deinit();
     const arena = arena_allocator.allocator();
 
-    for (symtab) |sym, i| {
+    for (symtab, 0..) |sym, i| {
         const sym_name = getString(strtab, sym.st_name);
         const sym_type = switch (sym.st_info & 0xf) {
             elf.STT_NOTYPE => "NOTYPE",
