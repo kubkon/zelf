@@ -83,13 +83,3 @@ Symbol table '.symtab' contains 10 entries:
 
 ```
 
-## Building from source
-
-You will need Zig 0.8.x in your PATH.
-
-```
-> git clone --recurse-submodules https://github.com/kubkon/zelf
-> cd zelf
-> zig build -Drelease-fast
-```
-
