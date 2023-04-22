@@ -618,7 +618,7 @@ fn printSymtab(self: Elf, shdr_ndx: u16, symtab: []const elf.Elf64_Sym, strtab: 
             break :blk try fmt.allocPrint(arena, "{d}", .{sym.st_shndx});
         };
         try writer.print(
-            "  {d: >3}: {x:0<16} {d: >5} {s: <7} {s: <6} {s: <8} {s: <5} {s}\n",
+            "  {d: >3}: {x:0>16} {d: >5} {s: <7} {s: <6} {s: <8} {s: <5} {s}\n",
             .{ i, sym.st_value, sym.st_size, sym_type, sym_bind, sym_vis, sym_ndx, sym_name },
         );
     }
