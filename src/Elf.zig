@@ -185,6 +185,14 @@ pub fn printHeader(self: Elf, writer: anytype) !void {
 }
 
 pub fn printShdrs(self: Elf, writer: anytype) !void {
+    const legend =
+        \\Key to Flags:
+        \\  W (write), A (alloc), X (execute), M (merge), S (strings), I (info),
+        \\  L (link order), O (extra OS processing required), G (group), T (TLS),
+        \\  C (compressed), x (unknown), o (OS specific), E (exclude),
+        \\  D (mbind), l (large), p (processor specific)
+    ;
+
     try writer.print("There are {d} section headers, starting at offset 0x{x}:\n\n", .{
         self.header.shnum,
         self.header.shoff,
@@ -275,6 +283,8 @@ pub fn printShdrs(self: Elf, writer: anytype) !void {
             shdr.sh_addralign,
         });
     }
+
+    try writer.writeAll(legend);
 }
 
 pub fn printPhdrs(self: Elf, writer: anytype) !void {
@@ -564,7 +574,7 @@ fn printSymtab(self: Elf, shdr_ndx: u16, symtab: []const elf.Elf64_Sym, strtab: 
 
     for (symtab, 0..) |sym, i| {
         const sym_name = getString(strtab, sym.st_name);
-        const sym_type = switch (sym.st_info & 0xf) {
+        const sym_type = switch (sym.st_type()) {
             elf.STT_NOTYPE => "NOTYPE",
             elf.STT_OBJECT => "OBJECT",
             elf.STT_FUNC => "FUNC",
@@ -583,7 +593,7 @@ fn printSymtab(self: Elf, shdr_ndx: u16, symtab: []const elf.Elf64_Sym, strtab: 
                 break :blk "UNK";
             },
         };
-        const sym_bind = switch (sym.st_info >> 4) {
+        const sym_bind = switch (sym.st_bind()) {
             elf.STB_LOCAL => "LOCAL",
             elf.STB_GLOBAL => "GLOBAL",
             elf.STB_WEAK => "WEAK",
