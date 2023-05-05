@@ -205,7 +205,10 @@ pub fn printShdrs(self: Elf, writer: anytype) !void {
     defer arena_allocator.deinit();
     const arena = arena_allocator.allocator();
 
+    var sh_name_fmt = FormatName(16){};
+
     for (self.shdrs.items, 0..) |shdr, i| {
+        const sh_flags = shdr.sh_flags;
         const sh_name = self.getShString(shdr.sh_name);
         const sh_type = switch (shdr.sh_type) {
             elf.SHT_NULL => "NULL",
@@ -240,36 +243,54 @@ pub fn printShdrs(self: Elf, writer: anytype) !void {
         };
         const flags = blk: {
             var flags = std.ArrayList(u8).init(arena);
-            if (elf.SHF_WRITE & shdr.sh_flags != 0) {
+            if (elf.SHF_WRITE & sh_flags != 0) {
                 try flags.append('W');
             }
-            if (elf.SHF_ALLOC & shdr.sh_flags != 0) {
+            if (elf.SHF_ALLOC & sh_flags != 0) {
                 try flags.append('A');
             }
-            if (elf.SHF_EXECINSTR & shdr.sh_flags != 0) {
+            if (elf.SHF_EXECINSTR & sh_flags != 0) {
                 try flags.append('X');
             }
-            if (elf.SHF_MERGE & shdr.sh_flags != 0) {
+            if (elf.SHF_MERGE & sh_flags != 0) {
                 try flags.append('M');
             }
-            if (elf.SHF_STRINGS & shdr.sh_flags != 0) {
+            if (elf.SHF_STRINGS & sh_flags != 0) {
                 try flags.append('S');
             }
-            if (elf.SHF_INFO_LINK & shdr.sh_flags != 0) {
+            if (elf.SHF_INFO_LINK & sh_flags != 0) {
                 try flags.append('I');
             }
-            if (elf.SHF_LINK_ORDER & shdr.sh_flags != 0) {
+            if (elf.SHF_LINK_ORDER & sh_flags != 0) {
                 try flags.append('L');
             }
-            if (elf.SHF_EXCLUDE & shdr.sh_flags != 0) {
+            if (elf.SHF_EXCLUDE & sh_flags != 0) {
                 try flags.append('E');
+            }
+            if (elf.SHF_COMPRESSED & sh_flags != 0) {
+                try flags.append('C');
+            }
+            if (elf.SHF_GROUP & sh_flags != 0) {
+                try flags.append('G');
+            }
+            if (elf.SHF_OS_NONCONFORMING & sh_flags != 0) {
+                try flags.append('O');
+            }
+            if (elf.SHF_TLS & sh_flags != 0) {
+                try flags.append('T');
+            }
+            if (elf.SHF_X86_64_LARGE & sh_flags != 0) {
+                try flags.append('l');
+            }
+            if (elf.SHF_MIPS_ADDR & sh_flags != 0 or elf.SHF_ARM_PURECODE & sh_flags != 0) {
+                try flags.append('p');
             }
             // TODO parse more flags
             break :blk try flags.toOwnedSlice();
         };
         try writer.print("  [{d: >2}]  {s: <16}  {s: <16}  {x:0>16}  {x:0>16}\n", .{
             i,
-            sh_name,
+            sh_name_fmt.fmt(sh_name),
             sh_type,
             shdr.sh_addr,
             shdr.sh_offset,
@@ -572,6 +593,8 @@ fn printSymtab(self: Elf, shdr_ndx: u16, symtab: []const elf.Elf64_Sym, strtab: 
     defer arena_allocator.deinit();
     const arena = arena_allocator.allocator();
 
+    var sym_name_fmt = FormatName(32){};
+
     for (symtab, 0..) |sym, i| {
         const sym_name = getString(strtab, sym.st_name);
         const sym_type = switch (sym.st_type()) {
@@ -629,7 +652,7 @@ fn printSymtab(self: Elf, shdr_ndx: u16, symtab: []const elf.Elf64_Sym, strtab: 
         };
         try writer.print(
             "  {d: >3}: {x:0>16} {d: >5} {s: <7} {s: <6} {s: <8} {s: <5} {s}\n",
-            .{ i, sym.st_value, sym.st_size, sym_type, sym_bind, sym_vis, sym_ndx, sym_name },
+            .{ i, sym.st_value, sym.st_size, sym_type, sym_bind, sym_vis, sym_ndx, sym_name_fmt.fmt(sym_name) },
         );
     }
 }
@@ -650,4 +673,17 @@ fn readShdrContents(self: Elf, shdr_index: u32) ![]u8 {
     const amt = try self.file.preadAll(buffer, shdr.sh_offset);
     assert(amt == buffer.len);
     return buffer;
+}
+
+fn FormatName(comptime max_len: comptime_int) type {
+    return struct {
+        buffer: [max_len]u8 = undefined,
+
+        fn fmt(this: *@This(), name: []const u8) []const u8 {
+            if (name.len <= max_len) return name;
+            @memcpy(this.buffer[0 .. max_len - 4], name[0 .. max_len - 4]);
+            @memcpy(this.buffer[max_len - 4 ..], "[..]");
+            return &this.buffer;
+        }
+    };
 }
