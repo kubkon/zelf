@@ -1,7 +1,6 @@
 const Elf = @This();
 
 const std = @import("std");
-const bits = @import("bits.zig");
 const assert = std.debug.assert;
 const elf = std.elf;
 const fmt = std.fmt;
@@ -580,19 +579,19 @@ fn printSymtab(
         };
         const sym_vis = (&if (sym.st_other == 0) "DEFAULT" else "UNKNOWN").*;
         const sym_ndx = blk: {
-            if (bits.SHN_LORESERVE <= sym.st_shndx and sym.st_shndx < bits.SHN_HIRESERVE) {
-                if (bits.SHN_LOPROC <= sym.st_shndx and sym.st_shndx < bits.SHN_HIPROC) {
-                    break :blk try fmt.allocPrint(self.arena, "LO+{d}", .{sym.st_shndx - bits.SHN_LOPROC});
+            if (elf.SHN_LORESERVE <= sym.st_shndx and sym.st_shndx < elf.SHN_HIRESERVE) {
+                if (elf.SHN_LOPROC <= sym.st_shndx and sym.st_shndx < elf.SHN_HIPROC) {
+                    break :blk try fmt.allocPrint(self.arena, "LO+{d}", .{sym.st_shndx - elf.SHN_LOPROC});
                 }
 
                 const sym_ndx = &switch (sym.st_shndx) {
-                    bits.SHN_ABS => "ABS",
-                    bits.SHN_COMMON => "COM",
-                    bits.SHN_LIVEPATCH => "LIV",
+                    elf.SHN_ABS => "ABS",
+                    elf.SHN_COMMON => "COM",
+                    elf.SHN_LIVEPATCH => "LIV",
                     else => "UNK",
                 };
                 break :blk sym_ndx.*;
-            } else if (sym.st_shndx == bits.SHN_UNDEF) {
+            } else if (sym.st_shndx == elf.SHN_UNDEF) {
                 break :blk "UND";
             }
             break :blk try fmt.allocPrint(self.arena, "{d}", .{sym.st_shndx});
