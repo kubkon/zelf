@@ -193,6 +193,8 @@ pub fn printShdrs(self: Elf, writer: anytype) !void {
             elf.SHT_PREINIT_ARRAY => "PREINIT_ARRAY",
             elf.SHT_GROUP => "GROUP",
             elf.SHT_SYMTAB_SHNDX => "SYMTAB_SHNDX",
+            elf.SHT_X86_64_UNWIND => "X86_64_UNWIND",
+            elf.SHT_LLVM_ADDRSIG => "LLVM_ADDRSIG",
             else => |sht| blk: {
                 if (elf.SHT_LOOS <= sht and sht < elf.SHT_HIOS) {
                     break :blk try fmt.allocPrint(self.arena, "LOOS+0x{x}", .{sht - elf.SHT_LOOS});
