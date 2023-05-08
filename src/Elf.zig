@@ -494,7 +494,13 @@ pub fn printRelocs(self: Elf, writer: anytype) !void {
             var sym_name: []const u8 = undefined;
             if (self.symtab_index != null and shdr.sh_link == self.symtab_index.?) {
                 sym = self.symtab.items[r_sym];
-                sym_name = getString(self.strtab.items, sym.st_name);
+                sym_name = blk: {
+                    if (sym.st_name == 0 and sym.st_type() == elf.STT_SECTION) {
+                        const target_shdr = self.shdrs.items[sym.st_shndx];
+                        break :blk self.getShString(target_shdr.sh_name);
+                    }
+                    break :blk getString(self.strtab.items, sym.st_name);
+                };
             } else if (self.dynsymtab_index != null and shdr.sh_link == self.dynsymtab_index.?) {
                 sym = self.dynsymtab.items[r_sym];
                 sym_name = getString(self.dynstrtab.items, sym.st_name);
@@ -545,14 +551,19 @@ pub fn printRelocs(self: Elf, writer: anytype) !void {
                 bits.R_X86_64_NUM => "R_X86_64_NUM",
                 else => "UNKNOWN",
             };
-            try writer.print("{x:0>12} {x:0>12} {s: <24} {x:0>16} {s} {d}\n", .{
+            try writer.print("{x:0>12} {x:0>12} {s: <24} {x:0>16} {s} ", .{
                 reloc.r_offset,
                 reloc.r_info,
                 rel_type,
                 sym.st_value,
                 sym_name,
-                reloc.r_addend,
             });
+            if (reloc.r_addend >= 0) {
+                try writer.print("+ {x}", .{reloc.r_addend});
+            } else {
+                try writer.print("- {x}", .{try std.math.absInt(reloc.r_addend)});
+            }
+            try writer.writeByte('\n');
         }
         try writer.print("\n", .{});
     }
