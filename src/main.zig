@@ -46,37 +46,42 @@ const ArgsIterator = struct {
 };
 
 pub fn main() anyerror!void {
-    const all_args = try std.process.argsAlloc(gpa);
-    defer std.process.argsFree(gpa, all_args);
+    var arena_allocator = std.heap.ArenaAllocator.init(gpa);
+    defer arena_allocator.deinit();
+    const arena = arena_allocator.allocator();
+
+    const all_args = try std.process.argsAlloc(arena);
     const args = all_args[1..];
 
     if (args.len == 0) fatal(usage, .{});
 
     var filename: ?[]const u8 = null;
-    var print_all = false;
-    var print_header = false;
-    var print_phdrs = false;
-    var print_shdrs = false;
-    var print_symtab = false;
-    var print_relocs = false;
 
-    var args_iter = ArgsIterator{ .args = args };
+    const PrintMatrix = packed struct {
+        header: u1 = 0,
+        phdrs: u1 = 0,
+        shdrs: u1 = 0,
+        symbols: u1 = 0,
+        relocs: u1 = 0,
+    };
+    var print_matrix: PrintMatrix = .{};
 
-    while (args_iter.next()) |arg| {
+    var it = ArgsIterator{ .args = args };
+    while (it.next()) |arg| {
         if (std.mem.eql(u8, arg, "--help")) {
             fatal(usage, .{});
         } else if (std.mem.eql(u8, arg, "-a") or std.mem.eql(u8, arg, "--all")) {
-            print_all = true;
+            print_matrix = @bitCast(PrintMatrix, ~@as(u5, 0));
         } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--file-header")) {
-            print_header = true;
+            print_matrix.header = 1;
         } else if (std.mem.eql(u8, arg, "-l") or std.mem.eql(u8, arg, "--program-headers")) {
-            print_phdrs = true;
+            print_matrix.phdrs = 1;
         } else if (std.mem.eql(u8, arg, "-S") or std.mem.eql(u8, arg, "--section-headers")) {
-            print_shdrs = true;
+            print_matrix.shdrs = 1;
         } else if (std.mem.eql(u8, arg, "-s") or std.mem.eql(u8, arg, "--symbols")) {
-            print_symtab = true;
+            print_matrix.symbols = 1;
         } else if (std.mem.eql(u8, arg, "-r") or std.mem.eql(u8, arg, "--relocs")) {
-            print_relocs = true;
+            print_matrix.relocs = 1;
         } else {
             if (filename != null) fatal("too many positional arguments specified", .{});
             filename = arg;
@@ -86,32 +91,33 @@ pub fn main() anyerror!void {
     const fname = filename orelse fatal("no input file specified", .{});
     const file = try fs.cwd().openFile(fname, .{});
     defer file.close();
+    const data = try file.readToEndAlloc(arena, std.math.maxInt(u32));
 
-    var elf = Elf.init(gpa, file);
-    defer elf.deinit();
-    try elf.parseMetadata();
+    var elf = Elf{ .arena = arena, .data = data };
+    try elf.parse();
 
     const stdout = std.io.getStdOut().writer();
 
-    if (print_all) {
+    if (@bitCast(u5, print_matrix) == 0) fatal("no option specified", .{});
+
+    if (print_matrix.header == 1) {
         try elf.printHeader(stdout);
         try stdout.writeAll("\n");
+    }
+    if (print_matrix.shdrs == 1) {
         try elf.printShdrs(stdout);
         try stdout.writeAll("\n");
+    }
+    if (print_matrix.phdrs == 1) {
         try elf.printPhdrs(stdout);
         try stdout.writeAll("\n");
+    }
+    if (print_matrix.relocs == 1) {
         try elf.printRelocs(stdout);
         try stdout.writeAll("\n");
+    }
+    if (print_matrix.symbols == 1) {
         try elf.printSymtabs(stdout);
-    } else if (print_header) {
-        try elf.printHeader(stdout);
-    } else if (print_shdrs) {
-        try elf.printShdrs(stdout);
-    } else if (print_phdrs) {
-        try elf.printPhdrs(stdout);
-    } else if (print_relocs) {
-        try elf.printRelocs(stdout);
-    } else if (print_symtab) {
-        try elf.printSymtabs(stdout);
-    } else fatal("no option specified", .{});
+        try stdout.writeAll("\n");
+    }
 }
