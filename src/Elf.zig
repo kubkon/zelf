@@ -606,11 +606,13 @@ fn printSymtab(
 }
 
 fn getShString(self: Elf, off: u32) []const u8 {
+    if (self.shstrtab.len == 0) return "<no-strings>";
     assert(off < self.shstrtab.len);
     return mem.sliceTo(@ptrCast([*:0]const u8, self.shstrtab.ptr + off), 0);
 }
 
 fn getString(strtab: []const u8, off: u32) []const u8 {
+    if (strtab.len == 0) return "<no-strings>";
     assert(off < strtab.len);
     return mem.sliceTo(@ptrCast([*:0]const u8, strtab.ptr + off), 0);
 }
