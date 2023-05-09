@@ -620,6 +620,7 @@ inline fn getSectionContents(self: Elf, shdr: elf.Elf64_Shdr) []const u8 {
 }
 
 fn getSectionContentsByIndex(self: Elf, shdr_index: u32) []const u8 {
+    if (self.shdrs.len == 0) return &[0]u8{};
     assert(shdr_index < self.shdrs.len);
     const shdr = self.shdrs[shdr_index];
     return self.getSectionContents(shdr);
