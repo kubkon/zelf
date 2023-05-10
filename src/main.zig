@@ -94,7 +94,10 @@ pub fn main() anyerror!void {
     const data = try file.readToEndAlloc(arena, std.math.maxInt(u32));
 
     var elf = Elf{ .arena = arena, .data = data };
-    try elf.parse();
+    elf.parse() catch |err| switch (err) {
+        error.InvalidMagic => fatal("not an ELF file - invalid magic bytes", .{}),
+        else => |e| return e,
+    };
 
     const stdout = std.io.getStdOut().writer();
 

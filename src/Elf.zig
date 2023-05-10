@@ -30,6 +30,9 @@ pub fn parse(self: *Elf) !void {
     const reader = stream.reader();
 
     self.header = try reader.readStruct(elf.Elf64_Ehdr);
+
+    if (!mem.eql(u8, self.header.e_ident[0..4], "\x7fELF")) return error.InvalidMagic;
+
     self.shdrs = @ptrCast([*]align(1) const elf.Elf64_Shdr, self.data.ptr + self.header.e_shoff)[0..self.header.e_shnum];
     self.phdrs = @ptrCast([*]align(1) const elf.Elf64_Phdr, self.data.ptr + self.header.e_phoff)[0..self.header.e_phnum];
     self.shstrtab = self.getSectionContentsByIndex(self.header.e_shstrndx);
