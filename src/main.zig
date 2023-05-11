@@ -17,6 +17,7 @@ const usage =
     \\-s, --symbols            Display symbol table
     \\    --dyn-syms           Display the dynamic symbol table
     \\-r, --relocs             Display relocations (if any)
+    \\-d, --dynamic            Display the dynamic section (if present)
     \\--help                   Display this help and exit
     \\
 ;
@@ -59,12 +60,31 @@ pub fn main() anyerror!void {
     var filename: ?[]const u8 = null;
 
     const PrintMatrix = packed struct {
-        header: u1 = 0,
-        phdrs: u1 = 0,
-        shdrs: u1 = 0,
-        symbols: u1 = 0,
-        dynamic_symbols: u1 = 0,
-        relocs: u1 = 0,
+        header: bool = false,
+        phdrs: bool = false,
+        shdrs: bool = false,
+        symbols: bool = false,
+        dynamic_symbols: bool = false,
+        dynamic_section: bool = false,
+        relocs: bool = false,
+
+        const Int = blk: {
+            const bits = @typeInfo(@This()).Struct.fields.len;
+            break :blk @Type(.{
+                .Int = .{
+                    .signedness = .unsigned,
+                    .bits = bits,
+                },
+            });
+        };
+
+        fn enableAll() @This() {
+            return @bitCast(@This(), ~@as(Int, 0));
+        }
+
+        fn isSet(pm: @This()) bool {
+            return @bitCast(Int, pm) == 0;
+        }
     };
     var print_matrix: PrintMatrix = .{};
 
@@ -73,19 +93,21 @@ pub fn main() anyerror!void {
         if (std.mem.eql(u8, arg, "--help")) {
             fatal(usage, .{});
         } else if (std.mem.eql(u8, arg, "-a") or std.mem.eql(u8, arg, "--all")) {
-            print_matrix = @bitCast(PrintMatrix, ~@as(u6, 0));
+            print_matrix = PrintMatrix.enableAll();
         } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--file-header")) {
-            print_matrix.header = 1;
+            print_matrix.header = true;
         } else if (std.mem.eql(u8, arg, "-l") or std.mem.eql(u8, arg, "--program-headers")) {
-            print_matrix.phdrs = 1;
+            print_matrix.phdrs = true;
         } else if (std.mem.eql(u8, arg, "-S") or std.mem.eql(u8, arg, "--section-headers")) {
-            print_matrix.shdrs = 1;
+            print_matrix.shdrs = true;
         } else if (std.mem.eql(u8, arg, "-s") or std.mem.eql(u8, arg, "--symbols")) {
-            print_matrix.symbols = 1;
+            print_matrix.symbols = true;
         } else if (std.mem.eql(u8, arg, "--dyn-syms")) {
-            print_matrix.dynamic_symbols = 1;
+            print_matrix.dynamic_symbols = true;
         } else if (std.mem.eql(u8, arg, "-r") or std.mem.eql(u8, arg, "--relocs")) {
-            print_matrix.relocs = 1;
+            print_matrix.relocs = true;
+        } else if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--dynamic")) {
+            print_matrix.dynamic_section = true;
         } else {
             if (filename != null) fatal("too many positional arguments specified", .{});
             filename = arg;
@@ -105,30 +127,34 @@ pub fn main() anyerror!void {
 
     const stdout = std.io.getStdOut().writer();
 
-    if (@bitCast(u6, print_matrix) == 0) fatal("no option specified", .{});
+    if (print_matrix.isSet()) fatal("no option specified", .{});
 
-    if (print_matrix.header == 1) {
+    if (print_matrix.header) {
         try elf.printHeader(stdout);
         try stdout.writeAll("\n");
     }
-    if (print_matrix.shdrs == 1) {
+    if (print_matrix.shdrs) {
         try elf.printShdrs(stdout);
         try stdout.writeAll("\n");
     }
-    if (print_matrix.phdrs == 1) {
+    if (print_matrix.phdrs) {
         try elf.printPhdrs(stdout);
         try stdout.writeAll("\n");
     }
-    if (print_matrix.relocs == 1) {
+    if (print_matrix.relocs) {
         try elf.printRelocs(stdout);
         try stdout.writeAll("\n");
     }
-    if (print_matrix.symbols == 1) {
+    if (print_matrix.symbols) {
         try elf.printSymbolTable(stdout);
         try stdout.writeAll("\n");
     }
-    if (print_matrix.dynamic_symbols == 1) {
+    if (print_matrix.dynamic_symbols) {
         try elf.printDynamicSymbolTable(stdout);
+        try stdout.writeAll("\n");
+    }
+    if (print_matrix.dynamic_section) {
+        try elf.printDynamicSection(stdout);
         try stdout.writeAll("\n");
     }
 }

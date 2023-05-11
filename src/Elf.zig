@@ -608,6 +608,42 @@ fn printSymtab(
     }
 }
 
+pub fn printDynamicSection(self: Elf, writer: anytype) !void {
+    const shdr = self.getShdrByType(elf.SHT_DYNAMIC) orelse
+        return writer.writeAll("There is no dynamic section in this file.");
+    const data = self.getSectionContents(shdr);
+    const nentries = @divExact(data.len, shdr.sh_entsize);
+
+    try writer.print(" {s:<18} {s:<24} {s}\n", .{ "Tag", "Type", "Name/Value" });
+
+    for (0..nentries) |i| {
+        const pair = data[i * shdr.sh_entsize ..][0..shdr.sh_entsize];
+        const key = mem.readIntLittle(u64, pair[0..8]);
+        const value = mem.readIntLittle(u64, pair[8..16]);
+
+        switch (key) {
+            elf.DT_NEEDED => {
+                const name = getString(self.dynstrtab, @intCast(u32, value));
+                try writer.print("0x{x:0>16} {s:<24} Shared library: [{s}]\n", .{ key, "(NEEDED)", name });
+            },
+            elf.DT_SONAME => {
+                const name = getString(self.dynstrtab, @intCast(u32, value));
+                try writer.print("0x{x:0>16} {s:<24} Library soname: [{s}]\n", .{ key, "(SONAME)", name });
+            },
+            else => {
+                try writer.print("{x} {x}\n", .{ key, value });
+            },
+        }
+    }
+}
+
+fn getShdrByType(self: Elf, sh_type: u32) ?elf.Elf64_Shdr {
+    for (self.shdrs) |shdr| if (shdr.sh_type == sh_type) {
+        return shdr;
+    };
+    return null;
+}
+
 fn getShString(self: Elf, off: u32) []const u8 {
     if (self.shstrtab.len == 0) return "<no-strings>";
     assert(off < self.shstrtab.len);
