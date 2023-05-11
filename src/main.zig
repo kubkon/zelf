@@ -15,6 +15,7 @@ const usage =
     \\-l, --program-headers    Display program headers (if any)
     \\-S, --section-headers    Display section headers
     \\-s, --symbols            Display symbol table
+    \\    --dyn-syms           Display the dynamic symbol table
     \\-r, --relocs             Display relocations (if any)
     \\--help                   Display this help and exit
     \\
@@ -62,6 +63,7 @@ pub fn main() anyerror!void {
         phdrs: u1 = 0,
         shdrs: u1 = 0,
         symbols: u1 = 0,
+        dynamic_symbols: u1 = 0,
         relocs: u1 = 0,
     };
     var print_matrix: PrintMatrix = .{};
@@ -71,7 +73,7 @@ pub fn main() anyerror!void {
         if (std.mem.eql(u8, arg, "--help")) {
             fatal(usage, .{});
         } else if (std.mem.eql(u8, arg, "-a") or std.mem.eql(u8, arg, "--all")) {
-            print_matrix = @bitCast(PrintMatrix, ~@as(u5, 0));
+            print_matrix = @bitCast(PrintMatrix, ~@as(u6, 0));
         } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--file-header")) {
             print_matrix.header = 1;
         } else if (std.mem.eql(u8, arg, "-l") or std.mem.eql(u8, arg, "--program-headers")) {
@@ -80,6 +82,8 @@ pub fn main() anyerror!void {
             print_matrix.shdrs = 1;
         } else if (std.mem.eql(u8, arg, "-s") or std.mem.eql(u8, arg, "--symbols")) {
             print_matrix.symbols = 1;
+        } else if (std.mem.eql(u8, arg, "--dyn-syms")) {
+            print_matrix.dynamic_symbols = 1;
         } else if (std.mem.eql(u8, arg, "-r") or std.mem.eql(u8, arg, "--relocs")) {
             print_matrix.relocs = 1;
         } else {
@@ -101,7 +105,7 @@ pub fn main() anyerror!void {
 
     const stdout = std.io.getStdOut().writer();
 
-    if (@bitCast(u5, print_matrix) == 0) fatal("no option specified", .{});
+    if (@bitCast(u6, print_matrix) == 0) fatal("no option specified", .{});
 
     if (print_matrix.header == 1) {
         try elf.printHeader(stdout);
@@ -120,7 +124,11 @@ pub fn main() anyerror!void {
         try stdout.writeAll("\n");
     }
     if (print_matrix.symbols == 1) {
-        try elf.printSymtabs(stdout);
+        try elf.printSymbolTable(stdout);
+        try stdout.writeAll("\n");
+    }
+    if (print_matrix.dynamic_symbols == 1) {
+        try elf.printDynamicSymbolTable(stdout);
         try stdout.writeAll("\n");
     }
 }

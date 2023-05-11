@@ -513,17 +513,17 @@ fn formatRelocType(
     }
 }
 
-pub fn printSymtabs(self: Elf, writer: anytype) !void {
-    if (self.symtab_index == null and self.dynsymtab_index == null) {
-        try writer.print("There is no symbol table in this file.", .{});
-        return;
-    }
-    if (self.symtab_index) |ndx| {
-        try self.printSymtab(ndx, self.symtab, self.strtab, writer);
-    }
-    if (self.dynsymtab_index) |ndx| {
-        try self.printSymtab(ndx, self.dynsymtab, self.dynstrtab, writer);
-    }
+pub fn printSymbolTable(self: Elf, writer: anytype) !void {
+    const ndx = self.symtab_index orelse
+        return writer.print("There is no symbol table in this file.", .{});
+    try self.printSymtab(ndx, self.symtab, self.strtab, writer);
+}
+
+pub fn printDynamicSymbolTable(self: Elf, writer: anytype) !void {
+    const ndx = self.dynsymtab_index orelse
+        return writer.print("There is no dynamic symbol table in this file.", .{});
+    try self.printSymtab(ndx, self.dynsymtab, self.dynstrtab, writer);
+    std.log.warn("{s}", .{self.dynstrtab});
 }
 
 fn printSymtab(
