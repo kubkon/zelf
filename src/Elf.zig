@@ -612,14 +612,14 @@ pub fn printDynamicSection(self: Elf, writer: anytype) !void {
     const shdr = self.getShdrByType(elf.SHT_DYNAMIC) orelse
         return writer.writeAll("There is no dynamic section in this file.");
     const data = self.getSectionContents(shdr);
-    const nentries = @divExact(data.len, shdr.sh_entsize);
+    const nentries = @divExact(data.len, @sizeOf(elf.Elf64_Dyn));
+    const entries = @ptrCast([*]align(1) const elf.Elf64_Dyn, data.ptr)[0..nentries];
 
     try writer.print(" {s:<18} {s:<24} {s}\n", .{ "Tag", "Type", "Name/Value" });
 
-    for (0..nentries) |i| {
-        const pair = data[i * shdr.sh_entsize ..][0..shdr.sh_entsize];
-        const key = mem.readIntLittle(u64, pair[0..8]);
-        const value = mem.readIntLittle(u64, pair[8..16]);
+    for (entries) |entry| {
+        const key = @bitCast(u64, entry.d_tag);
+        const value = entry.d_val;
 
         try writer.print("0x{x:0>16} {s:<22}", .{ key, fmtDynamicSectionType(key) });
 
