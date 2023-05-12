@@ -621,19 +621,172 @@ pub fn printDynamicSection(self: Elf, writer: anytype) !void {
         const key = mem.readIntLittle(u64, pair[0..8]);
         const value = mem.readIntLittle(u64, pair[8..16]);
 
+        try writer.print("0x{x:0>16} {s:<22}", .{ key, fmtDynamicSectionType(key) });
+
         switch (key) {
             elf.DT_NEEDED => {
                 const name = getString(self.dynstrtab, @intCast(u32, value));
-                try writer.print("0x{x:0>16} {s:<24} Shared library: [{s}]\n", .{ key, "(NEEDED)", name });
+                try writer.print(" Shared library: [{s}]", .{name});
             },
+
             elf.DT_SONAME => {
                 const name = getString(self.dynstrtab, @intCast(u32, value));
-                try writer.print("0x{x:0>16} {s:<24} Library soname: [{s}]\n", .{ key, "(SONAME)", name });
+                try writer.print(" Library soname: [{s}]", .{name});
             },
-            else => {
-                try writer.print("{x} {x}\n", .{ key, value });
-            },
+
+            elf.DT_INIT_ARRAY,
+            elf.DT_HASH,
+            elf.DT_GNU_HASH,
+            elf.DT_STRTAB,
+            elf.DT_SYMTAB,
+            elf.DT_PLTGOT,
+            elf.DT_JMPREL,
+            elf.DT_RELA,
+            elf.DT_VERDEF,
+            elf.DT_VERNEED,
+            elf.DT_VERSYM,
+            elf.DT_NULL,
+            => try writer.print(" 0x{x}", .{value}),
+
+            elf.DT_INIT_ARRAYSZ,
+            elf.DT_STRSZ,
+            elf.DT_SYMENT,
+            elf.DT_PLTRELSZ,
+            elf.DT_RELASZ,
+            elf.DT_RELAENT,
+            => try writer.print(" {d} (bytes)", .{value}),
+
+            elf.DT_PLTREL => try writer.print(" {s}", .{fmtDynamicSectionType(value)}),
+
+            elf.DT_FLAGS => if (value > 0) {
+                if (value & DF_ORIGIN != 0) try writer.writeAll(" ORIGIN");
+                if (value & DF_SYMBOLIC != 0) try writer.writeAll(" SYMBOLIC");
+                if (value & DF_TEXTREL != 0) try writer.writeAll(" TEXTREL");
+                if (value & DF_BIND_NOW != 0) try writer.writeAll(" BIND_NOW");
+                if (value & DF_STATIC_TLS != 0) try writer.writeAll(" STATIC_TLS");
+            } else try writer.print(" {x}", .{value}),
+
+            elf.DT_FLAGS_1 => if (value > 0) {
+                try writer.writeAll(" Flags:");
+                if (value & DF_1_NOW != 0) try writer.writeAll(" NOW");
+                if (value & DF_1_GLOBAL != 0) try writer.writeAll(" GLOBAL");
+                if (value & DF_1_GROUP != 0) try writer.writeAll(" GROUP");
+                if (value & DF_1_NODELETE != 0) try writer.writeAll(" NODELETE");
+                if (value & DF_1_LOADFLTR != 0) try writer.writeAll(" LOADFLTR");
+                if (value & DF_1_INITFIRST != 0) try writer.writeAll(" INITFIRST");
+                if (value & DF_1_NOOPEN != 0) try writer.writeAll(" NOOPEN");
+                if (value & DF_1_ORIGIN != 0) try writer.writeAll(" ORIGIN");
+                if (value & DF_1_DIRECT != 0) try writer.writeAll(" DIRECT");
+                if (value & DF_1_TRANS != 0) try writer.writeAll(" TRANS");
+                if (value & DF_1_INTERPOSE != 0) try writer.writeAll(" INTERPOSE");
+                if (value & DF_1_NODEFLIB != 0) try writer.writeAll(" NODEFLIB");
+                if (value & DF_1_NODUMP != 0) try writer.writeAll(" NODUMP");
+                if (value & DF_1_CONFALT != 0) try writer.writeAll(" CONFALT");
+                if (value & DF_1_ENDFILTEE != 0) try writer.writeAll(" ENDFILTEE");
+                if (value & DF_1_DISPRELDNE != 0) try writer.writeAll(" DISPRELDNE");
+                if (value & DF_1_DISPRELPND != 0) try writer.writeAll(" DISPRELPND");
+                if (value & DF_1_NODIRECT != 0) try writer.writeAll(" NODIRECT");
+                if (value & DF_1_IGNMULDEF != 0) try writer.writeAll(" IGNMULDEF");
+                if (value & DF_1_NOKSYMS != 0) try writer.writeAll(" NOKSYMS");
+                if (value & DF_1_NOHDR != 0) try writer.writeAll(" NOHDR");
+                if (value & DF_1_EDITED != 0) try writer.writeAll(" EDITED");
+                if (value & DF_1_NORELOC != 0) try writer.writeAll(" NORELOC");
+                if (value & DF_1_SYMINTPOSE != 0) try writer.writeAll(" SYMINTPOSE");
+                if (value & DF_1_GLOBAUDIT != 0) try writer.writeAll(" GLOBAUDIT");
+                if (value & DF_1_SINGLETON != 0) try writer.writeAll(" SINGLETON");
+                if (value & DF_1_STUB != 0) try writer.writeAll(" STUB");
+                if (value & DF_1_PIE != 0) try writer.writeAll(" PIE");
+            } else try writer.print(" {x}", .{value}),
+
+            elf.DT_RELACOUNT => try writer.print(" {d}", .{value}),
+
+            else => try writer.print(" {x}", .{value}),
         }
+
+        try writer.writeByte('\n');
+    }
+}
+
+pub const DF_ORIGIN = 0x00000001;
+pub const DF_SYMBOLIC = 0x00000002;
+pub const DF_TEXTREL = 0x00000004;
+pub const DF_BIND_NOW = 0x00000008;
+pub const DF_STATIC_TLS = 0x00000010;
+
+pub const DF_1_NOW = 0x00000001;
+pub const DF_1_GLOBAL = 0x00000002;
+pub const DF_1_GROUP = 0x00000004;
+pub const DF_1_NODELETE = 0x00000008;
+pub const DF_1_LOADFLTR = 0x00000010;
+pub const DF_1_INITFIRST = 0x00000020;
+pub const DF_1_NOOPEN = 0x00000040;
+pub const DF_1_ORIGIN = 0x00000080;
+pub const DF_1_DIRECT = 0x00000100;
+pub const DF_1_TRANS = 0x00000200;
+pub const DF_1_INTERPOSE = 0x00000400;
+pub const DF_1_NODEFLIB = 0x00000800;
+pub const DF_1_NODUMP = 0x00001000;
+pub const DF_1_CONFALT = 0x00002000;
+pub const DF_1_ENDFILTEE = 0x00004000;
+pub const DF_1_DISPRELDNE = 0x00008000;
+pub const DF_1_DISPRELPND = 0x00010000;
+pub const DF_1_NODIRECT = 0x00020000;
+pub const DF_1_IGNMULDEF = 0x00040000;
+pub const DF_1_NOKSYMS = 0x00080000;
+pub const DF_1_NOHDR = 0x00100000;
+pub const DF_1_EDITED = 0x00200000;
+pub const DF_1_NORELOC = 0x00400000;
+pub const DF_1_SYMINTPOSE = 0x00800000;
+pub const DF_1_GLOBAUDIT = 0x01000000;
+pub const DF_1_SINGLETON = 0x02000000;
+pub const DF_1_STUB = 0x04000000;
+pub const DF_1_PIE = 0x08000000;
+
+fn fmtDynamicSectionType(@"type": u64) std.fmt.Formatter(formatDynamicSectionType) {
+    return .{ .data = @"type" };
+}
+
+fn formatDynamicSectionType(
+    @"type": u64,
+    comptime unused_fmt_string: []const u8,
+    options: std.fmt.FormatOptions,
+    writer: anytype,
+) !void {
+    _ = unused_fmt_string;
+    const str = switch (@"type") {
+        elf.DT_NEEDED => "NEEDED",
+        elf.DT_SONAME => "SONAME",
+        elf.DT_INIT_ARRAY => "INIT_ARRAY",
+        elf.DT_INIT_ARRAYSZ => "INIT_ARRAYSZ",
+        elf.DT_HASH => "HASH",
+        elf.DT_GNU_HASH => "GNU_HASH",
+        elf.DT_STRTAB => "STRTAB",
+        elf.DT_SYMTAB => "SYMTAB",
+        elf.DT_STRSZ => "STRSZ",
+        elf.DT_SYMENT => "SYMENT",
+        elf.DT_PLTGOT => "PLTGOT",
+        elf.DT_PLTRELSZ => "PLTRELSZ",
+        elf.DT_PLTREL => "PLTREL",
+        elf.DT_JMPREL => "JMPREL",
+        elf.DT_RELA => "RELA",
+        elf.DT_RELASZ => "RELASZ",
+        elf.DT_RELAENT => "RELAENT",
+        elf.DT_VERDEF => "VERDEF",
+        elf.DT_VERDEFNUM => "VERDEFNUM",
+        elf.DT_FLAGS => "FLAGS",
+        elf.DT_FLAGS_1 => "FLAGS_1",
+        elf.DT_VERNEED => "VERNEED",
+        elf.DT_VERNEEDNUM => "VERNEEDNUM",
+        elf.DT_VERSYM => "VERSYM",
+        elf.DT_RELACOUNT => "RELACOUNT",
+        elf.DT_NULL => "NULL",
+        else => "UNKNOWN",
+    };
+    try writer.print("{s}", .{str});
+    if (options.width) |width| {
+        if (str.len > width) return error.NoSpaceLeft; // TODO how should we actually handle this here?
+        const fill = width - str.len;
+        if (fill > 0) try writer.writeByteNTimes(options.fill, fill);
     }
 }
 
