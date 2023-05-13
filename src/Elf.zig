@@ -523,7 +523,6 @@ pub fn printDynamicSymbolTable(self: Elf, writer: anytype) !void {
     const ndx = self.dynsymtab_index orelse
         return writer.print("There is no dynamic symbol table in this file.", .{});
     try self.printSymtab(ndx, self.dynsymtab, self.dynstrtab, writer);
-    std.log.warn("{s}", .{self.dynstrtab});
 }
 
 fn printSymtab(
