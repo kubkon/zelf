@@ -623,17 +623,24 @@ pub fn printDynamicSection(self: Elf, writer: anytype) !void {
         try writer.print("0x{x:0>16} {s:<22}", .{ key, fmtDynamicSectionType(key) });
 
         switch (key) {
-            elf.DT_NEEDED => {
+            elf.DT_NEEDED,
+            elf.DT_SONAME,
+            elf.DT_RPATH,
+            elf.DT_RUNPATH,
+            => {
                 const name = getString(self.dynstrtab, @intCast(u32, value));
-                try writer.print(" Shared library: [{s}]", .{name});
-            },
-
-            elf.DT_SONAME => {
-                const name = getString(self.dynstrtab, @intCast(u32, value));
-                try writer.print(" Library soname: [{s}]", .{name});
+                switch (key) {
+                    elf.DT_NEEDED => try writer.writeAll(" Shared library: "),
+                    elf.DT_SONAME => try writer.writeAll(" Library soname: "),
+                    elf.DT_RPATH => try writer.writeAll(" Library rpath: "),
+                    elf.DT_RUNPATH => try writer.writeAll(" Library runpath: "),
+                    else => unreachable,
+                }
+                try writer.print("[{s}]", .{name});
             },
 
             elf.DT_INIT_ARRAY,
+            elf.DT_FINI_ARRAY,
             elf.DT_HASH,
             elf.DT_GNU_HASH,
             elf.DT_STRTAB,
@@ -644,10 +651,13 @@ pub fn printDynamicSection(self: Elf, writer: anytype) !void {
             elf.DT_VERDEF,
             elf.DT_VERNEED,
             elf.DT_VERSYM,
+            elf.DT_INIT,
+            elf.DT_FINI,
             elf.DT_NULL,
             => try writer.print(" 0x{x}", .{value}),
 
             elf.DT_INIT_ARRAYSZ,
+            elf.DT_FINI_ARRAYSZ,
             elf.DT_STRSZ,
             elf.DT_SYMENT,
             elf.DT_PLTRELSZ,
@@ -757,6 +767,8 @@ fn formatDynamicSectionType(
         elf.DT_SONAME => "SONAME",
         elf.DT_INIT_ARRAY => "INIT_ARRAY",
         elf.DT_INIT_ARRAYSZ => "INIT_ARRAYSZ",
+        elf.DT_FINI_ARRAY => "FINI_ARRAY",
+        elf.DT_FINI_ARRAYSZ => "FINI_ARRAYSZ",
         elf.DT_HASH => "HASH",
         elf.DT_GNU_HASH => "GNU_HASH",
         elf.DT_STRTAB => "STRTAB",
@@ -778,6 +790,10 @@ fn formatDynamicSectionType(
         elf.DT_VERNEEDNUM => "VERNEEDNUM",
         elf.DT_VERSYM => "VERSYM",
         elf.DT_RELACOUNT => "RELACOUNT",
+        elf.DT_RPATH => "RPATH",
+        elf.DT_RUNPATH => "RUNPATH",
+        elf.DT_INIT => "INIT",
+        elf.DT_FINI => "FINI",
         elf.DT_NULL => "NULL",
         else => "UNKNOWN",
     };
