@@ -581,7 +581,7 @@ fn printSymtab(
                 break :blk "UNKNOWN";
             },
         };
-        const sym_vis = (&if (sym.st_other == 0) "DEFAULT" else "UNKNOWN").*;
+        const sym_vis = @intToEnum(elf.STV, sym.st_other);
         const sym_ndx = blk: {
             if (elf.SHN_LORESERVE <= sym.st_shndx and sym.st_shndx < elf.SHN_HIRESERVE) {
                 if (elf.SHN_LOPROC <= sym.st_shndx and sym.st_shndx < elf.SHN_HIPROC) {
@@ -602,7 +602,7 @@ fn printSymtab(
         };
         try writer.print(
             "  {d: >3}: {x:0>16} {d: >5} {s: <7} {s: <6} {s: <8} {s: <5} {s}\n",
-            .{ i, sym.st_value, sym.st_size, sym_type, sym_bind, sym_vis, sym_ndx, sym_name_fmt.fmt(sym_name) },
+            .{ i, sym.st_value, sym.st_size, sym_type, sym_bind, @tagName(sym_vis), sym_ndx, sym_name_fmt.fmt(sym_name) },
         );
     }
 }
@@ -803,6 +803,44 @@ fn formatDynamicSectionType(
         const fill = width - str.len;
         if (fill > 0) try writer.writeByteNTimes(options.fill, fill);
     }
+}
+
+pub fn printInitializers(self: Elf, writer: anytype) !void {
+    var no_inits = true;
+    for (self.shdrs) |shdr| switch (shdr.sh_type) {
+        elf.SHT_INIT_ARRAY, elf.SHT_FINI_ARRAY, elf.SHT_PREINIT_ARRAY => {
+            try writer.print("{s}:\n", .{self.getShString(shdr.sh_name)});
+            const entry_size = shdr.sh_entsize;
+            const entries = self.getSectionContents(shdr);
+            const nentries = @divExact(shdr.sh_size, entry_size);
+            var ientry: usize = 0;
+            while (ientry < nentries) : (ientry += 1) {
+                const off = ientry * entry_size;
+                const entry = entries[off..][0..entry_size];
+                const value = switch (entry_size) {
+                    4 => mem.readIntLittle(u32, entry[0..4]),
+                    8 => mem.readIntLittle(u64, entry[0..8]),
+                    else => unreachable,
+                };
+                const sym_index = self.findSymbolByAddress(value).?;
+                const name = getString(self.strtab, self.symtab[sym_index].st_name);
+                try writer.print("  {x:0>16}: {x:0>16}    {s}\n", .{ shdr.sh_addr + off, value, name });
+            }
+            no_inits = false;
+        },
+        else => {},
+    };
+
+    if (no_inits) {
+        try writer.writeAll("There is no .init_array, .fini_array or .preinit_array section in this file.");
+    }
+}
+
+fn findSymbolByAddress(self: Elf, addr: u64) ?u32 {
+    for (self.symtab, 0..) |sym, idx| {
+        if (sym.st_value <= addr and addr < sym.st_value + sym.st_size) return @intCast(u32, idx);
+    }
+    return null;
 }
 
 fn getShdrByType(self: Elf, sh_type: u32) ?elf.Elf64_Shdr {

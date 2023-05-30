@@ -18,6 +18,7 @@ const usage =
     \\    --dyn-syms           Display the dynamic symbol table
     \\-r, --relocs             Display relocations (if any)
     \\-d, --dynamic            Display the dynamic section (if present)
+    \\--initializers           Display table(s) of initializers/finalizers (if present)
     \\--help                   Display this help and exit
     \\
 ;
@@ -67,6 +68,7 @@ pub fn main() anyerror!void {
         dynamic_symbols: bool = false,
         dynamic_section: bool = false,
         relocs: bool = false,
+        initializers: bool = false,
 
         const Int = blk: {
             const bits = @typeInfo(@This()).Struct.fields.len;
@@ -108,6 +110,8 @@ pub fn main() anyerror!void {
             print_matrix.relocs = true;
         } else if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--dynamic")) {
             print_matrix.dynamic_section = true;
+        } else if (std.mem.eql(u8, arg, "--initializers")) {
+            print_matrix.initializers = true;
         } else {
             if (filename != null) fatal("too many positional arguments specified", .{});
             filename = arg;
@@ -155,6 +159,10 @@ pub fn main() anyerror!void {
     }
     if (print_matrix.dynamic_section) {
         try elf.printDynamicSection(stdout);
+        try stdout.writeAll("\n");
+    }
+    if (print_matrix.initializers) {
+        try elf.printInitializers(stdout);
         try stdout.writeAll("\n");
     }
 }
