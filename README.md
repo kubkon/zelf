@@ -11,10 +11,15 @@ Usage: zelf [options] file
 General Options:
 -a, --all                Equivalent of having all flags on
 -h, --file-header        Display ELF file header
--l, --program-headers    Display program headers (if any)
+-l, --program-headers    Display program headers (if present)
 -S, --section-headers    Display section headers
 -s, --symbols            Display symbol table
--r, --relocs             Display relocations (if any)
+    --dyn-syms           Display the dynamic symbol table
+-r, --relocs             Display relocations (if present)
+-d, --dynamic            Display the dynamic section (if present)
+--initializers           Display table(s) of initializers/finalizers (if present)
+-V, --version-info       Display the version sections (if present)
+-W, --wide               Do not shorten the names if too wide
 --help                   Display this help and exit
 ```
 
