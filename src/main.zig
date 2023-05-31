@@ -91,6 +91,10 @@ pub fn main() anyerror!void {
         fn isSet(pm: @This()) bool {
             return @bitCast(Int, pm) == 0;
         }
+
+        fn add(pm: *@This(), other: @This()) void {
+            pm.* = @bitCast(@This(), @bitCast(Int, pm.*) | @bitCast(Int, other));
+        }
     };
     var print_matrix: PrintMatrix = .{};
 
@@ -105,14 +109,17 @@ pub fn main() anyerror!void {
                 'h' => tmp.header = true,
                 'l' => tmp.phdrs = true,
                 'S' => tmp.shdrs = true,
-                's' => tmp.symbols = true,
+                's' => {
+                    tmp.dynamic_symbols = true;
+                    tmp.symbols = true;
+                },
                 'r' => tmp.relocs = true,
                 'd' => tmp.dynamic_section = true,
                 'V' => tmp.version_sections = true,
                 'W' => opts.wide = true,
                 else => break :blk,
             };
-            print_matrix = tmp;
+            print_matrix.add(tmp);
             continue;
         }
 
@@ -127,6 +134,7 @@ pub fn main() anyerror!void {
         } else if (std.mem.eql(u8, arg, "--section-headers")) {
             print_matrix.shdrs = true;
         } else if (std.mem.eql(u8, arg, "--symbols")) {
+            print_matrix.dynamic_symbols = true;
             print_matrix.symbols = true;
         } else if (std.mem.eql(u8, arg, "--dyn-syms")) {
             print_matrix.dynamic_symbols = true;
