@@ -904,19 +904,32 @@ pub fn printVersionSections(self: Elf, writer: anytype) !void {
             self.getShString(self.shdrs[shdr.sh_link].sh_name),
         });
 
-        for (self.versymtab, 0..) |versym, i| {
-            const actual_versym = versym & VERSYM_VERSION;
-            const name = switch (actual_versym) {
-                VER_NDX_LOCAL => "*local*",
-                VER_NDX_GLOBAL => "*global*",
-                else => blk: {
-                    const verdef = self.verdefsyms.items[self.verdefsyms_lookup.get(actual_versym).?];
-                    const verauxs = self.verdefaux.items[verdef.aux..][0..verdef.sym.vd_cnt];
-                    break :blk getString(self.dynstrtab, verauxs[0].vda_name);
-                },
-            };
-            const hidden = versym & VERSYM_HIDDEN != 0;
-            try writer.print("  {d:0>3}: {d: >4}{s}({s})\n", .{ i, actual_versym, if (hidden) "h" else " ", name });
+        var count: usize = 0;
+        while (count < self.versymtab.len) : (count += 4) {
+            const remaining = self.versymtab[count..];
+            const num = @min(remaining.len, 4);
+
+            try writer.print("  {x:0>4}", .{count});
+
+            for (remaining[0..num]) |versym| {
+                const actual_versym = versym & VERSYM_VERSION;
+                const name = switch (actual_versym) {
+                    VER_NDX_LOCAL => "*local*",
+                    VER_NDX_GLOBAL => "*global*",
+                    else => blk: {
+                        if (self.verdefsyms_lookup.get(actual_versym)) |verdef_index| {
+                            const verdef = self.verdefsyms.items[verdef_index];
+                            const verauxs = self.verdefaux.items[verdef.aux..][0..verdef.sym.vd_cnt];
+                            break :blk getString(self.dynstrtab, verauxs[0].vda_name);
+                        }
+                        break :blk try std.fmt.allocPrint(self.arena, "unknown({d})", .{actual_versym});
+                    },
+                };
+                const hidden = versym & VERSYM_HIDDEN != 0;
+                try writer.print(" {d: >4}{s}({s})", .{ actual_versym, if (hidden) "h" else " ", name });
+            }
+
+            try writer.writeByte('\n');
         }
         try writer.writeByte('\n');
     }
