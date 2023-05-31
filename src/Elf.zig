@@ -24,13 +24,13 @@ verdef_index: ?u32 = null,
 verdefsyms: std.ArrayListUnmanaged(VersionSym(elf.Elf64_Verdef)) = .{},
 /// Lookup to verdefsyms.
 verdefsyms_lookup: std.AutoHashMapUnmanaged(u32, u32) = .{},
-verdefaux: std.ArrayListUnmanaged(elf.Elf64_Verdaux) = .{},
+verdefaux: std.ArrayListUnmanaged(VersionSymAux(elf.Elf64_Verdaux)) = .{},
 
 verneed_index: ?u32 = null,
 verneedsyms: std.ArrayListUnmanaged(VersionSym(elf.Elf64_Verneed)) = .{},
 /// Lookup to verneedaux.
 verneedsyms_lookup: std.AutoHashMapUnmanaged(u32, u32) = .{},
-verneedaux: std.ArrayListUnmanaged(elf.Elf64_Vernaux) = .{},
+verneedaux: std.ArrayListUnmanaged(VersionSymAux(elf.Elf64_Vernaux)) = .{},
 
 pub fn parse(self: *Elf) !void {
     var stream = std.io.fixedBufferStream(self.data);
@@ -95,28 +95,34 @@ pub fn parse(self: *Elf) !void {
         try self.verdefsyms.ensureTotalCapacityPrecise(self.arena, nsyms);
         try self.verdefsyms_lookup.ensureTotalCapacity(self.arena, nsyms);
 
-        var i: u32 = 0;
-        var offset: u32 = 0;
-        while (i < nsyms) : (i += 1) {
-            const index = @intCast(u32, self.verdefsyms.items.len);
-            const verdefsym = @ptrCast(*align(1) const elf.Elf64_Verdef, raw.ptr + offset).*;
-            const aux = @intCast(u32, self.verdefaux.items.len);
-            self.verdefsyms.appendAssumeCapacity(.{
-                .sym = verdefsym,
-                .aux = aux,
-            });
-            self.verdefsyms_lookup.putAssumeCapacityNoClobber(verdefsym.vd_ndx, index);
-
-            var aux_i: u32 = 0;
-            var aux_offset: u32 = @sizeOf(elf.Elf64_Verdef) + offset;
-            try self.verdefaux.ensureUnusedCapacity(self.arena, verdefsym.vd_cnt);
-            while (aux_i < verdefsym.vd_cnt) : (aux_i += 1) {
-                const verdefaux = @ptrCast(*align(1) const elf.Elf64_Verdaux, raw.ptr + aux_offset).*;
-                self.verdefaux.appendAssumeCapacity(verdefaux);
-                aux_offset += verdefaux.vda_next;
+        {
+            var i: u32 = 0;
+            var offset: u32 = 0;
+            while (i < nsyms) : (i += 1) {
+                const verdefsym = @ptrCast(*align(1) const elf.Elf64_Verdef, raw.ptr + offset).*;
+                self.verdefsyms.appendAssumeCapacity(.{
+                    .sym = verdefsym,
+                    .off = offset,
+                    .aux = undefined,
+                });
+                offset += verdefsym.vd_next;
             }
+        }
 
-            offset += verdefsym.vd_next;
+        for (self.verdefsyms.items, 0..) |*verdefsym, i| {
+            const aux = @intCast(u32, self.verdefaux.items.len);
+            verdefsym.aux = aux;
+
+            self.verdefsyms_lookup.putAssumeCapacityNoClobber(verdefsym.sym.vd_ndx, @intCast(u32, i));
+            try self.verdefaux.ensureUnusedCapacity(self.arena, verdefsym.sym.vd_cnt);
+
+            var j: u32 = 0;
+            var offset: u32 = verdefsym.off + verdefsym.sym.vd_aux;
+            while (j < verdefsym.sym.vd_cnt) : (j += 1) {
+                const verdefaux = @ptrCast(*align(1) const elf.Elf64_Verdaux, raw.ptr + offset).*;
+                self.verdefaux.appendAssumeCapacity(.{ .off = offset, .sym = verdefaux });
+                offset += verdefaux.vda_next;
+            }
         }
     }
 
@@ -126,28 +132,35 @@ pub fn parse(self: *Elf) !void {
         const nsyms = @intCast(u32, self.getVerneedNum());
         try self.verneedsyms.ensureTotalCapacityPrecise(self.arena, nsyms);
 
-        var i: u32 = 0;
-        var offset: u32 = 0;
-        while (i < nsyms) : (i += 1) {
-            const verneedsym = @ptrCast(*align(1) const elf.Elf64_Verneed, raw.ptr + offset).*;
-            const aux = @intCast(u32, self.verneedaux.items.len);
-            self.verneedsyms.appendAssumeCapacity(.{
-                .sym = verneedsym,
-                .aux = aux,
-            });
-
-            var aux_i: u32 = 0;
-            var aux_offset: u32 = @sizeOf(elf.Elf64_Verneed) + offset;
-            try self.verneedaux.ensureUnusedCapacity(self.arena, verneedsym.vn_cnt);
-            try self.verneedsyms_lookup.ensureUnusedCapacity(self.arena, verneedsym.vn_cnt);
-            while (aux_i < verneedsym.vn_cnt) : (aux_i += 1) {
-                const verneedaux = @ptrCast(*align(1) const elf.Elf64_Vernaux, raw.ptr + aux_offset).*;
-                self.verneedaux.appendAssumeCapacity(verneedaux);
-                aux_offset += verneedaux.vna_next;
-                self.verneedsyms_lookup.putAssumeCapacityNoClobber(verneedaux.vna_other, aux + aux_i);
+        {
+            var i: u32 = 0;
+            var offset: u32 = 0;
+            while (i < nsyms) : (i += 1) {
+                const verneedsym = @ptrCast(*align(1) const elf.Elf64_Verneed, raw.ptr + offset).*;
+                self.verneedsyms.appendAssumeCapacity(.{
+                    .sym = verneedsym,
+                    .off = offset,
+                    .aux = undefined,
+                });
+                offset += verneedsym.vn_next;
             }
+        }
 
-            offset += verneedsym.vn_next;
+        for (self.verneedsyms.items) |*verneedsym| {
+            const aux = @intCast(u32, self.verneedaux.items.len);
+            verneedsym.aux = aux;
+
+            try self.verneedaux.ensureUnusedCapacity(self.arena, verneedsym.sym.vn_cnt);
+            try self.verneedsyms_lookup.ensureUnusedCapacity(self.arena, verneedsym.sym.vn_cnt);
+
+            var i: u32 = 0;
+            var offset: u32 = verneedsym.off + verneedsym.sym.vn_aux;
+            while (i < verneedsym.sym.vn_cnt) : (i += 1) {
+                const verneedaux = @ptrCast(*align(1) const elf.Elf64_Vernaux, raw.ptr + offset).*;
+                self.verneedaux.appendAssumeCapacity(.{ .off = offset, .sym = verneedaux });
+                offset += verneedaux.vna_next;
+                self.verneedsyms_lookup.putAssumeCapacityNoClobber(verneedaux.vna_other, aux + i);
+            }
         }
     }
 }
@@ -964,11 +977,11 @@ pub fn printVersionSections(self: Elf, writer: anytype) !void {
                         if (self.verdefsyms_lookup.get(actual_versym)) |verdef_index| {
                             const verdef = self.verdefsyms.items[verdef_index];
                             const verauxs = self.verdefaux.items[verdef.aux..][0..verdef.sym.vd_cnt];
-                            break :blk getString(self.dynstrtab, verauxs[0].vda_name);
+                            break :blk getString(self.dynstrtab, verauxs[0].sym.vda_name);
                         }
                         if (self.verneedsyms_lookup.get(actual_versym)) |vernaux_index| {
                             const vernaux = self.verneedaux.items[vernaux_index];
-                            break :blk getString(self.dynstrtab, vernaux.vna_name);
+                            break :blk getString(self.dynstrtab, vernaux.sym.vna_name);
                         }
                         break :blk try std.fmt.allocPrint(self.arena, "unknown({d})", .{actual_versym});
                     },
@@ -995,11 +1008,10 @@ pub fn printVersionSections(self: Elf, writer: anytype) !void {
             self.getShString(self.shdrs[shdr.sh_link].sh_name),
         });
 
-        var offset: u32 = 0;
         for (self.verdefsyms.items) |verdef| {
             const verauxs = self.verdefaux.items[verdef.aux..][0..verdef.sym.vd_cnt];
             try writer.print("  0x{x:0>8}: Rev: {d}  Flags: {s}  Index: {d: >2}  Cnt: {d: >2}  Name: {s}\n", .{
-                offset,
+                verdef.off,
                 verdef.sym.vd_version,
                 switch (verdef.sym.vd_flags) {
                     0 => "none",
@@ -1009,20 +1021,16 @@ pub fn printVersionSections(self: Elf, writer: anytype) !void {
                 },
                 verdef.sym.vd_ndx,
                 verdef.sym.vd_cnt,
-                getString(self.dynstrtab, verauxs[0].vda_name),
+                getString(self.dynstrtab, verauxs[0].sym.vda_name),
             });
 
-            var aux_offset = offset + @sizeOf(elf.Elf64_Verdef) + @sizeOf(elf.Elf64_Verdaux);
             for (verauxs[1..], 1..) |veraux, i| {
                 try writer.print("  0x{x:0>8}: Parent {d}: {s}\n", .{
-                    aux_offset,
+                    veraux.off,
                     i,
-                    getString(self.dynstrtab, veraux.vda_name),
+                    getString(self.dynstrtab, veraux.sym.vda_name),
                 });
-                aux_offset += veraux.vda_next;
             }
-
-            offset += verdef.sym.vd_next;
         }
 
         try writer.writeByte('\n');
@@ -1041,33 +1049,28 @@ pub fn printVersionSections(self: Elf, writer: anytype) !void {
             self.getShString(self.shdrs[shdr.sh_link].sh_name),
         });
 
-        var offset: u32 = 0;
         for (self.verneedsyms.items) |verneed| {
             const verauxs = self.verneedaux.items[verneed.aux..][0..verneed.sym.vn_cnt];
             try writer.print("  0x{x:0>8}: Version: {d}  File: {s}  Cnt: {d}\n", .{
-                offset,
+                verneed.off,
                 verneed.sym.vn_version,
                 getString(self.dynstrtab, verneed.sym.vn_file),
                 verneed.sym.vn_cnt,
             });
 
-            var aux_offset = offset + @sizeOf(elf.Elf64_Verneed);
             for (verauxs) |veraux| {
                 try writer.print("  0x{x:0>8}:   Name: {s}  Flags: {s}  Version: {d}\n", .{
-                    aux_offset,
-                    getString(self.dynstrtab, veraux.vna_name),
-                    switch (veraux.vna_flags) {
+                    veraux.off,
+                    getString(self.dynstrtab, veraux.sym.vna_name),
+                    switch (veraux.sym.vna_flags) {
                         0 => "none",
                         VER_FLG_BASE => "BASE",
                         VER_FLG_WEAK => "WEAK",
                         else => "unknown",
                     },
-                    veraux.vna_other,
+                    veraux.sym.vna_other,
                 });
-                aux_offset += veraux.vna_next;
             }
-
-            offset += verneed.sym.vn_next;
         }
     }
 }
@@ -1175,7 +1178,15 @@ pub const Options = struct {
 fn VersionSym(comptime Inner: type) type {
     return struct {
         sym: Inner,
+        off: u32,
         aux: u32,
+    };
+}
+
+fn VersionSymAux(comptime Inner: type) type {
+    return struct {
+        sym: Inner,
+        off: u32,
     };
 }
 
