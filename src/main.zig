@@ -12,13 +12,14 @@ const usage =
     \\General Options:
     \\-a, --all                Equivalent of having all flags on
     \\-h, --file-header        Display ELF file header
-    \\-l, --program-headers    Display program headers (if any)
+    \\-l, --program-headers    Display program headers (if present)
     \\-S, --section-headers    Display section headers
     \\-s, --symbols            Display symbol table
     \\    --dyn-syms           Display the dynamic symbol table
-    \\-r, --relocs             Display relocations (if any)
+    \\-r, --relocs             Display relocations (if present)
     \\-d, --dynamic            Display the dynamic section (if present)
     \\--initializers           Display table(s) of initializers/finalizers (if present)
+    \\-V, --version-info       Display the version sections (if present)
     \\-W, --wide               Do not shorten the names if too wide
     \\--help                   Display this help and exit
     \\
@@ -71,6 +72,7 @@ pub fn main() anyerror!void {
         dynamic_section: bool = false,
         relocs: bool = false,
         initializers: bool = false,
+        version_sections: bool = false,
 
         const Int = blk: {
             const bits = @typeInfo(@This()).Struct.fields.len;
@@ -106,6 +108,7 @@ pub fn main() anyerror!void {
                 's' => tmp.symbols = true,
                 'r' => tmp.relocs = true,
                 'd' => tmp.dynamic_section = true,
+                'V' => tmp.version_sections = true,
                 'W' => opts.wide = true,
                 else => break :blk,
             };
@@ -133,6 +136,8 @@ pub fn main() anyerror!void {
             print_matrix.dynamic_section = true;
         } else if (std.mem.eql(u8, arg, "--initializers")) {
             print_matrix.initializers = true;
+        } else if (std.mem.eql(u8, arg, "--version-info")) {
+            print_matrix.version_sections = true;
         } else if (std.mem.eql(u8, arg, "--wide")) {
             opts.wide = true;
         } else {
@@ -186,6 +191,10 @@ pub fn main() anyerror!void {
     }
     if (print_matrix.initializers) {
         try elf.printInitializers(stdout);
+        try stdout.writeAll("\n");
+    }
+    if (print_matrix.version_sections) {
+        try elf.printVersionSections(stdout);
         try stdout.writeAll("\n");
     }
 }

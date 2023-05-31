@@ -11,9 +11,19 @@ symtab_index: ?u32 = null,
 symtab: []align(1) const elf.Elf64_Sym = &[0]elf.Elf64_Sym{},
 strtab: []const u8 = &[0]u8{},
 
+dynamic_index: ?u32 = null,
+
 dynsymtab_index: ?u32 = null,
 dynsymtab: []align(1) const elf.Elf64_Sym = &[0]elf.Elf64_Sym{},
 dynstrtab: []const u8 = &[0]u8{},
+
+versymtab_index: ?u32 = null,
+versymtab: []align(1) const elf.Elf64_Versym = &[0]elf.Elf64_Versym{},
+
+verdef_index: ?u32 = null,
+verdefsyms: std.ArrayListUnmanaged(VerdefSym) = .{},
+verdefsyms_lookup: std.AutoHashMapUnmanaged(u32, u32) = .{},
+verdefaux: std.ArrayListUnmanaged(elf.Elf64_Verdaux) = .{},
 
 pub fn parse(self: *Elf) !void {
     var stream = std.io.fixedBufferStream(self.data);
@@ -48,8 +58,56 @@ pub fn parse(self: *Elf) !void {
                 else => unreachable,
             }
         },
+
+        elf.SHT_DYNAMIC => {
+            self.dynamic_index = @intCast(u32, i);
+        },
+
+        0x6ffffffd => { // VERDEF
+            self.verdef_index = @intCast(u32, i);
+        },
+
+        0x6fffffff => { // VERSYM
+            self.versymtab_index = @intCast(u32, i);
+            const raw = self.getSectionContents(shdr);
+            const nsyms = @divExact(raw.len, @sizeOf(elf.Elf64_Versym));
+            self.versymtab = @ptrCast([*]align(1) const elf.Elf64_Versym, raw.ptr)[0..nsyms];
+        },
+
         else => {},
     };
+
+    if (self.verdef_index) |shndx| {
+        const shdr = self.shdrs[shndx];
+        const raw = self.getSectionContents(shdr);
+        const nsyms = @intCast(u32, self.getVerdefNum());
+        try self.verdefsyms.ensureTotalCapacityPrecise(self.arena, nsyms);
+        try self.verdefsyms_lookup.ensureTotalCapacity(self.arena, nsyms);
+
+        var i: u32 = 0;
+        var offset: u32 = 0;
+        while (i < nsyms) : (i += 1) {
+            const index = @intCast(u32, self.verdefsyms.items.len);
+            const verdefsym = @ptrCast(*align(1) const elf.Elf64_Verdef, raw.ptr + offset).*;
+            const aux = @intCast(u32, self.verdefaux.items.len);
+            self.verdefsyms.appendAssumeCapacity(.{
+                .sym = verdefsym,
+                .aux = aux,
+            });
+            self.verdefsyms_lookup.putAssumeCapacityNoClobber(verdefsym.vd_ndx, index);
+
+            var aux_i: u32 = 0;
+            var aux_offset: u32 = @sizeOf(elf.Elf64_Verdef) + offset;
+            try self.verdefaux.ensureUnusedCapacity(self.arena, verdefsym.vd_cnt);
+            while (aux_i < verdefsym.vd_cnt) : (aux_i += 1) {
+                const verdefaux = @ptrCast(*align(1) const elf.Elf64_Verdaux, raw.ptr + aux_offset).*;
+                self.verdefaux.appendAssumeCapacity(verdefaux);
+                aux_offset += verdefaux.vda_next;
+            }
+
+            offset += verdefsym.vd_next;
+        }
+    }
 }
 
 pub fn printHeader(self: Elf, writer: anytype) !void {
@@ -830,6 +888,122 @@ pub fn printInitializers(self: Elf, writer: anytype) !void {
     }
 }
 
+pub fn printVersionSections(self: Elf, writer: anytype) !void {
+    var no_version_sections = false;
+
+    if (self.versymtab_index) |shndx| {
+        const shdr = self.shdrs[shndx];
+        try writer.print("Version symbols section '{s}' contains {d} entries:\n", .{
+            self.getShString(shdr.sh_name),
+            self.versymtab.len,
+        });
+        try writer.print(" Addr: 0x{x:0>16}  Offset: 0x{x:0>8}  Link: {d} ({s})\n", .{
+            shdr.sh_addr,
+            shdr.sh_offset,
+            shdr.sh_link,
+            self.getShString(self.shdrs[shdr.sh_link].sh_name),
+        });
+
+        for (self.versymtab, 0..) |versym, i| {
+            const actual_versym = versym & VERSYM_VERSION;
+            const name = switch (actual_versym) {
+                VER_NDX_LOCAL => "*local*",
+                VER_NDX_GLOBAL => "*global*",
+                else => blk: {
+                    const verdef = self.verdefsyms.items[self.verdefsyms_lookup.get(actual_versym).?];
+                    const verauxs = self.verdefaux.items[verdef.aux..][0..verdef.sym.vd_cnt];
+                    break :blk getString(self.dynstrtab, verauxs[0].vda_name);
+                },
+            };
+            const hidden = versym & VERSYM_HIDDEN != 0;
+            try writer.print("  {d:0>3}: {d: >4}{s}({s})\n", .{ i, actual_versym, if (hidden) "h" else " ", name });
+        }
+        try writer.writeByte('\n');
+    }
+
+    if (self.verdef_index) |shndx| {
+        const shdr = self.shdrs[shndx];
+        try writer.print("Version definition section '{s}' contains {d} entries:\n", .{
+            self.getShString(shdr.sh_name),
+            self.verdefsyms.items.len,
+        });
+        try writer.print(" Addr: 0x{x:0>16}  Offset: 0x{x:0>8}  Link: {d} ({s})\n", .{
+            shdr.sh_addr,
+            shdr.sh_offset,
+            shdr.sh_link,
+            self.getShString(self.shdrs[shdr.sh_link].sh_name),
+        });
+
+        var offset: u32 = 0;
+        for (self.verdefsyms.items) |verdef| {
+            const verauxs = self.verdefaux.items[verdef.aux..][0..verdef.sym.vd_cnt];
+            try writer.print("  0x{x:0>8}: Rev: {d}  Flags: {s}  Index: {d: >2}  Cnt: {d: >2}  Name: {s}\n", .{
+                offset,
+                verdef.sym.vd_version,
+                switch (verdef.sym.vd_flags) {
+                    0 => "none",
+                    VER_FLG_BASE => "BASE",
+                    VER_FLG_WEAK => "WEAK",
+                    else => "unknown",
+                },
+                verdef.sym.vd_ndx,
+                verdef.sym.vd_cnt,
+                getString(self.dynstrtab, verauxs[0].vda_name),
+            });
+
+            var aux_offset = offset + @sizeOf(elf.Elf64_Verdef) + @sizeOf(elf.Elf64_Verdaux);
+            for (verauxs[1..], 1..) |veraux, i| {
+                try writer.print("  0x{x:0>8}: Parent {d}: {s}\n", .{
+                    aux_offset,
+                    i,
+                    getString(self.dynstrtab, veraux.vda_name),
+                });
+                aux_offset += veraux.vda_next;
+            }
+
+            offset += verdef.sym.vd_next;
+        }
+    }
+
+    if (no_version_sections) {
+        try writer.writeAll("There are no version sections in this file.");
+    }
+}
+
+const VERSYM_HIDDEN = 0x8000;
+const VERSYM_VERSION = 0x7fff;
+
+/// Symbol is local
+const VER_NDX_LOCAL = 0;
+/// Symbol is global
+const VER_NDX_GLOBAL = 1;
+/// Beginning of reserved entries
+const VER_NDX_LORESERVE = 0xff00;
+/// Symbol is to be eliminated
+const VER_NDX_ELIMINATE = 0xff01;
+
+/// Version definition of the file itself
+const VER_FLG_BASE = 1;
+/// Weak version identifier
+const VER_FLG_WEAK = 2;
+
+fn getDynamicTable(self: Elf) []align(1) const elf.Elf64_Dyn {
+    const shndx = self.dynamic_index orelse return &[0]elf.Elf64_Dyn{};
+    const raw = self.getSectionContentsByIndex(shndx);
+    const num = @divExact(raw.len, @sizeOf(elf.Elf64_Dyn));
+    return @ptrCast([*]align(1) const elf.Elf64_Dyn, raw.ptr)[0..num];
+}
+
+fn getVerdefNum(self: Elf) u64 {
+    const dynamic = self.getDynamicTable();
+    if (dynamic.len == 0) return 0;
+    for (dynamic) |entry| switch (entry.d_tag) {
+        elf.DT_VERDEFNUM => return entry.d_val,
+        else => {},
+    };
+    return 0;
+}
+
 fn findSymbolByAddress(self: Elf, addr: u64) ?u32 {
     for (self.symtab, 0..) |sym, idx| {
         if (sym.st_value <= addr and addr < sym.st_value + sym.st_size) return @intCast(u32, idx);
@@ -886,6 +1060,11 @@ fn FormatName(comptime max_len: comptime_int) type {
 
 pub const Options = struct {
     wide: bool = false,
+};
+
+const VerdefSym = struct {
+    sym: elf.Elf64_Verdef,
+    aux: u32,
 };
 
 const Elf = @This();
