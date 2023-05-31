@@ -19,6 +19,7 @@ const usage =
     \\-r, --relocs             Display relocations (if any)
     \\-d, --dynamic            Display the dynamic section (if present)
     \\--initializers           Display table(s) of initializers/finalizers (if present)
+    \\-W, --wide               Do not shorten the names if too wide
     \\--help                   Display this help and exit
     \\
 ;
