@@ -59,6 +59,7 @@ pub fn main() anyerror!void {
     if (args.len == 0) fatal(usage, .{});
 
     var filename: ?[]const u8 = null;
+    var opts: Elf.Options = .{};
 
     const PrintMatrix = packed struct {
         header: bool = false,
@@ -92,26 +93,47 @@ pub fn main() anyerror!void {
 
     var it = ArgsIterator{ .args = args };
     while (it.next()) |arg| {
+        if (std.mem.startsWith(u8, arg, "-")) blk: {
+            var i: usize = 1;
+            var tmp = PrintMatrix{};
+            while (i < arg.len) : (i += 1) switch (arg[i]) {
+                '-' => break :blk,
+                'a' => tmp = PrintMatrix.enableAll(),
+                'h' => tmp.header = true,
+                'l' => tmp.phdrs = true,
+                'S' => tmp.shdrs = true,
+                's' => tmp.symbols = true,
+                'r' => tmp.relocs = true,
+                'd' => tmp.dynamic_section = true,
+                'W' => opts.wide = true,
+                else => break :blk,
+            };
+            print_matrix = tmp;
+            continue;
+        }
+
         if (std.mem.eql(u8, arg, "--help")) {
             fatal(usage, .{});
-        } else if (std.mem.eql(u8, arg, "-a") or std.mem.eql(u8, arg, "--all")) {
+        } else if (std.mem.eql(u8, arg, "--all")) {
             print_matrix = PrintMatrix.enableAll();
-        } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--file-header")) {
+        } else if (std.mem.eql(u8, arg, "--file-header")) {
             print_matrix.header = true;
-        } else if (std.mem.eql(u8, arg, "-l") or std.mem.eql(u8, arg, "--program-headers")) {
+        } else if (std.mem.eql(u8, arg, "--program-headers")) {
             print_matrix.phdrs = true;
-        } else if (std.mem.eql(u8, arg, "-S") or std.mem.eql(u8, arg, "--section-headers")) {
+        } else if (std.mem.eql(u8, arg, "--section-headers")) {
             print_matrix.shdrs = true;
-        } else if (std.mem.eql(u8, arg, "-s") or std.mem.eql(u8, arg, "--symbols")) {
+        } else if (std.mem.eql(u8, arg, "--symbols")) {
             print_matrix.symbols = true;
         } else if (std.mem.eql(u8, arg, "--dyn-syms")) {
             print_matrix.dynamic_symbols = true;
-        } else if (std.mem.eql(u8, arg, "-r") or std.mem.eql(u8, arg, "--relocs")) {
+        } else if (std.mem.eql(u8, arg, "--relocs")) {
             print_matrix.relocs = true;
-        } else if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--dynamic")) {
+        } else if (std.mem.eql(u8, arg, "--dynamic")) {
             print_matrix.dynamic_section = true;
         } else if (std.mem.eql(u8, arg, "--initializers")) {
             print_matrix.initializers = true;
+        } else if (std.mem.eql(u8, arg, "--wide")) {
+            opts.wide = true;
         } else {
             if (filename != null) fatal("too many positional arguments specified", .{});
             filename = arg;
@@ -123,7 +145,7 @@ pub fn main() anyerror!void {
     defer file.close();
     const data = try file.readToEndAlloc(arena, std.math.maxInt(u32));
 
-    var elf = Elf{ .arena = arena, .data = data };
+    var elf = Elf{ .arena = arena, .data = data, .opts = opts };
     elf.parse() catch |err| switch (err) {
         error.InvalidMagic => fatal("not an ELF file - invalid magic bytes", .{}),
         else => |e| return e,

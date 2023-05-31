@@ -1,16 +1,6 @@
-const Elf = @This();
-
-const std = @import("std");
-const assert = std.debug.assert;
-const elf = std.elf;
-const fmt = std.fmt;
-const fs = std.fs;
-const mem = std.mem;
-
-const Allocator = mem.Allocator;
-
 arena: Allocator,
 data: []const u8,
+opts: Options,
 
 header: elf.Elf64_Ehdr = undefined,
 shdrs: []align(1) const elf.Elf64_Shdr = &[0]elf.Elf64_Shdr{},
@@ -173,7 +163,7 @@ pub fn printShdrs(self: Elf, writer: anytype) !void {
     try writer.print("  [Nr]  Name{s: <14}Type{s: <14}Address{s: <11}Offset\n", .{ "", "", "" });
     try writer.print("        Size{s: <14}EntSize{s: <11}Flags  Link  Info  Align\n", .{ "", "" });
 
-    var sh_name_fmt = FormatName(16){};
+    var sh_name_fmt = FormatName(max_name_len){ .wide = self.opts.wide };
 
     for (self.shdrs, 0..) |shdr, i| {
         const sh_flags = shdr.sh_flags;
@@ -547,7 +537,7 @@ fn printSymtab(
         .{ "", "", "", "", "", "" },
     );
 
-    var sym_name_fmt = FormatName(32){};
+    var sym_name_fmt = FormatName(max_name_len){ .wide = self.opts.wide };
 
     for (symtab, 0..) |sym, i| {
         const sym_name = getString(strtab, sym.st_name);
@@ -877,11 +867,15 @@ fn getSectionContentsByIndex(self: Elf, shdr_index: u32) []const u8 {
     return self.getSectionContents(shdr);
 }
 
+const max_name_len = 16;
+
 fn FormatName(comptime max_len: comptime_int) type {
     return struct {
         buffer: [max_len]u8 = undefined,
+        wide: bool = false,
 
         fn fmt(this: *@This(), name: []const u8) []const u8 {
+            if (this.wide) return name;
             if (name.len <= max_len) return name;
             @memcpy(this.buffer[0 .. max_len - 4], name[0 .. max_len - 4]);
             @memcpy(this.buffer[max_len - 4 ..], "[..]");
@@ -889,3 +883,18 @@ fn FormatName(comptime max_len: comptime_int) type {
         }
     };
 }
+
+pub const Options = struct {
+    wide: bool = false,
+};
+
+const Elf = @This();
+
+const std = @import("std");
+const assert = std.debug.assert;
+const elf = std.elf;
+const fmt = std.fmt;
+const fs = std.fs;
+const mem = std.mem;
+
+const Allocator = mem.Allocator;
