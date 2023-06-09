@@ -655,28 +655,36 @@ fn printSymtab(
 
     for (symtab, 0..) |sym, i| {
         const sym_name = blk: {
-            const base_name = getString(strtab, sym.st_name);
-            if (is_dynsym and self.versymtab_index != null) {
-                const versym = self.versymtab[@intCast(u32, i)] & VERSYM_VERSION;
-                if (self.verdefsyms_lookup.get(versym)) |verdef_index| {
-                    const verdef = self.verdefsyms.items[verdef_index];
-                    const verdaux = self.verdefaux.items[verdef.aux];
-                    break :blk try std.fmt.allocPrint(self.arena, "{s}@{s} ({d})", .{
-                        base_name,
-                        getString(strtab, verdaux.sym.vda_name),
-                        versym,
-                    });
-                }
-                if (self.verneedsyms_lookup.get(versym)) |verneed_index| {
-                    const vernaux = self.verneedaux.items[verneed_index];
-                    break :blk try std.fmt.allocPrint(self.arena, "{s}@{s} ({d})", .{
-                        base_name,
-                        getString(strtab, vernaux.sym.vna_name),
-                        versym,
-                    });
-                }
+            switch (sym.st_type()) {
+                elf.STT_SECTION => {
+                    const sym_shdr = self.shdrs[sym.st_shndx];
+                    break :blk self.getShString(sym_shdr.sh_name);
+                },
+                else => {
+                    const base_name = getString(strtab, sym.st_name);
+                    if (is_dynsym and self.versymtab_index != null) {
+                        const versym = self.versymtab[@intCast(u32, i)] & VERSYM_VERSION;
+                        if (self.verdefsyms_lookup.get(versym)) |verdef_index| {
+                            const verdef = self.verdefsyms.items[verdef_index];
+                            const verdaux = self.verdefaux.items[verdef.aux];
+                            break :blk try std.fmt.allocPrint(self.arena, "{s}@{s} ({d})", .{
+                                base_name,
+                                getString(strtab, verdaux.sym.vda_name),
+                                versym,
+                            });
+                        }
+                        if (self.verneedsyms_lookup.get(versym)) |verneed_index| {
+                            const vernaux = self.verneedaux.items[verneed_index];
+                            break :blk try std.fmt.allocPrint(self.arena, "{s}@{s} ({d})", .{
+                                base_name,
+                                getString(strtab, vernaux.sym.vna_name),
+                                versym,
+                            });
+                        }
+                    }
+                    break :blk base_name;
+                },
             }
-            break :blk base_name;
         };
         const sym_type = switch (sym.st_type()) {
             elf.STT_NOTYPE => "NOTYPE",
