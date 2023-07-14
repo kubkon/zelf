@@ -85,15 +85,15 @@ pub fn main() anyerror!void {
         };
 
         fn enableAll() @This() {
-            return @bitCast(@This(), ~@as(Int, 0));
+            return @as(@This(), @bitCast(~@as(Int, 0)));
         }
 
         fn isSet(pm: @This()) bool {
-            return @bitCast(Int, pm) == 0;
+            return @as(Int, @bitCast(pm)) == 0;
         }
 
         fn add(pm: *@This(), other: @This()) void {
-            pm.* = @bitCast(@This(), @bitCast(Int, pm.*) | @bitCast(Int, other));
+            pm.* = @as(@This(), @bitCast(@as(Int, @bitCast(pm.*)) | @as(Int, @bitCast(other))));
         }
     };
     var print_matrix: PrintMatrix = .{};

@@ -40,25 +40,25 @@ pub fn parse(self: *Elf) !void {
 
     if (!mem.eql(u8, self.header.e_ident[0..4], "\x7fELF")) return error.InvalidMagic;
 
-    self.shdrs = @ptrCast([*]align(1) const elf.Elf64_Shdr, self.data.ptr + self.header.e_shoff)[0..self.header.e_shnum];
-    self.phdrs = @ptrCast([*]align(1) const elf.Elf64_Phdr, self.data.ptr + self.header.e_phoff)[0..self.header.e_phnum];
+    self.shdrs = @as([*]align(1) const elf.Elf64_Shdr, @ptrCast(self.data.ptr + self.header.e_shoff))[0..self.header.e_shnum];
+    self.phdrs = @as([*]align(1) const elf.Elf64_Phdr, @ptrCast(self.data.ptr + self.header.e_phoff))[0..self.header.e_phnum];
     self.shstrtab = self.getSectionContentsByIndex(self.header.e_shstrndx);
 
     for (self.shdrs, 0..) |shdr, i| switch (shdr.sh_type) {
         elf.SHT_SYMTAB, elf.SHT_DYNSYM => {
             const raw = self.getSectionContents(shdr);
             const nsyms = @divExact(raw.len, @sizeOf(elf.Elf64_Sym));
-            const symtab = @ptrCast([*]align(1) const elf.Elf64_Sym, raw.ptr)[0..nsyms];
+            const symtab = @as([*]align(1) const elf.Elf64_Sym, @ptrCast(raw.ptr))[0..nsyms];
             const strtab = self.getSectionContentsByIndex(shdr.sh_link);
 
             switch (shdr.sh_type) {
                 elf.SHT_SYMTAB => {
-                    self.symtab_index = @intCast(u32, i);
+                    self.symtab_index = @as(u32, @intCast(i));
                     self.symtab = symtab;
                     self.strtab = strtab;
                 },
                 elf.SHT_DYNSYM => {
-                    self.dynsymtab_index = @intCast(u32, i);
+                    self.dynsymtab_index = @as(u32, @intCast(i));
                     self.dynsymtab = symtab;
                     self.dynstrtab = strtab;
                 },
@@ -67,22 +67,22 @@ pub fn parse(self: *Elf) !void {
         },
 
         elf.SHT_DYNAMIC => {
-            self.dynamic_index = @intCast(u32, i);
+            self.dynamic_index = @as(u32, @intCast(i));
         },
 
         0x6ffffffd => { // VERDEF
-            self.verdef_index = @intCast(u32, i);
+            self.verdef_index = @as(u32, @intCast(i));
         },
 
         0x6ffffffe => { // VERNEED
-            self.verneed_index = @intCast(u32, i);
+            self.verneed_index = @as(u32, @intCast(i));
         },
 
         0x6fffffff => { // VERSYM
-            self.versymtab_index = @intCast(u32, i);
+            self.versymtab_index = @as(u32, @intCast(i));
             const raw = self.getSectionContents(shdr);
             const nsyms = @divExact(raw.len, @sizeOf(elf.Elf64_Versym));
-            self.versymtab = @ptrCast([*]align(1) const elf.Elf64_Versym, raw.ptr)[0..nsyms];
+            self.versymtab = @as([*]align(1) const elf.Elf64_Versym, @ptrCast(raw.ptr))[0..nsyms];
         },
 
         else => {},
@@ -91,7 +91,7 @@ pub fn parse(self: *Elf) !void {
     if (self.verdef_index) |shndx| {
         const shdr = self.shdrs[shndx];
         const raw = self.getSectionContents(shdr);
-        const nsyms = @intCast(u32, self.getVerdefNum());
+        const nsyms = @as(u32, @intCast(self.getVerdefNum()));
         try self.verdefsyms.ensureTotalCapacityPrecise(self.arena, nsyms);
         try self.verdefsyms_lookup.ensureTotalCapacity(self.arena, nsyms);
 
@@ -99,7 +99,7 @@ pub fn parse(self: *Elf) !void {
             var i: u32 = 0;
             var offset: u32 = 0;
             while (i < nsyms) : (i += 1) {
-                const verdefsym = @ptrCast(*align(1) const elf.Elf64_Verdef, raw.ptr + offset).*;
+                const verdefsym = @as(*align(1) const elf.Elf64_Verdef, @ptrCast(raw.ptr + offset)).*;
                 self.verdefsyms.appendAssumeCapacity(.{
                     .sym = verdefsym,
                     .off = offset,
@@ -110,16 +110,16 @@ pub fn parse(self: *Elf) !void {
         }
 
         for (self.verdefsyms.items, 0..) |*verdefsym, i| {
-            const aux = @intCast(u32, self.verdefaux.items.len);
+            const aux = @as(u32, @intCast(self.verdefaux.items.len));
             verdefsym.aux = aux;
 
-            self.verdefsyms_lookup.putAssumeCapacityNoClobber(verdefsym.sym.vd_ndx, @intCast(u32, i));
+            self.verdefsyms_lookup.putAssumeCapacityNoClobber(verdefsym.sym.vd_ndx, @as(u32, @intCast(i)));
             try self.verdefaux.ensureUnusedCapacity(self.arena, verdefsym.sym.vd_cnt);
 
             var j: u32 = 0;
             var offset: u32 = verdefsym.off + verdefsym.sym.vd_aux;
             while (j < verdefsym.sym.vd_cnt) : (j += 1) {
-                const verdefaux = @ptrCast(*align(1) const elf.Elf64_Verdaux, raw.ptr + offset).*;
+                const verdefaux = @as(*align(1) const elf.Elf64_Verdaux, @ptrCast(raw.ptr + offset)).*;
                 self.verdefaux.appendAssumeCapacity(.{ .off = offset, .sym = verdefaux });
                 offset += verdefaux.vda_next;
             }
@@ -129,14 +129,14 @@ pub fn parse(self: *Elf) !void {
     if (self.verneed_index) |shndx| {
         const shdr = self.shdrs[shndx];
         const raw = self.getSectionContents(shdr);
-        const nsyms = @intCast(u32, self.getVerneedNum());
+        const nsyms = @as(u32, @intCast(self.getVerneedNum()));
         try self.verneedsyms.ensureTotalCapacityPrecise(self.arena, nsyms);
 
         {
             var i: u32 = 0;
             var offset: u32 = 0;
             while (i < nsyms) : (i += 1) {
-                const verneedsym = @ptrCast(*align(1) const elf.Elf64_Verneed, raw.ptr + offset).*;
+                const verneedsym = @as(*align(1) const elf.Elf64_Verneed, @ptrCast(raw.ptr + offset)).*;
                 self.verneedsyms.appendAssumeCapacity(.{
                     .sym = verneedsym,
                     .off = offset,
@@ -147,7 +147,7 @@ pub fn parse(self: *Elf) !void {
         }
 
         for (self.verneedsyms.items) |*verneedsym| {
-            const aux = @intCast(u32, self.verneedaux.items.len);
+            const aux = @as(u32, @intCast(self.verneedaux.items.len));
             verneedsym.aux = aux;
 
             try self.verneedaux.ensureUnusedCapacity(self.arena, verneedsym.sym.vn_cnt);
@@ -156,7 +156,7 @@ pub fn parse(self: *Elf) !void {
             var i: u32 = 0;
             var offset: u32 = verneedsym.off + verneedsym.sym.vn_aux;
             while (i < verneedsym.sym.vn_cnt) : (i += 1) {
-                const verneedaux = @ptrCast(*align(1) const elf.Elf64_Vernaux, raw.ptr + offset).*;
+                const verneedaux = @as(*align(1) const elf.Elf64_Vernaux, @ptrCast(raw.ptr + offset)).*;
                 self.verneedaux.appendAssumeCapacity(.{ .off = offset, .sym = verneedaux });
                 offset += verneedaux.vna_next;
                 self.verneedsyms_lookup.putAssumeCapacityNoClobber(verneedaux.vna_other, aux + i);
@@ -206,11 +206,11 @@ pub fn printHeader(self: Elf, writer: anytype) !void {
         else => "Unknown",
     } });
     try writer.print("  {s: <34} {d}\n", .{ "ABI Version:", self.header.e_ident[EI_ABIVERSION] });
-    if (elf.ET.LOPROC <= @enumToInt(self.header.e_type) and @enumToInt(self.header.e_type) < elf.ET.HIPROC) {
+    if (elf.ET.LOPROC <= @intFromEnum(self.header.e_type) and @intFromEnum(self.header.e_type) < elf.ET.HIPROC) {
         try writer.print("  {s: <34} {s}+{x} (Processor-specific)\n", .{
             "Type:",
             "LOPROC",
-            @enumToInt(self.header.e_type),
+            @intFromEnum(self.header.e_type),
         });
     } else {
         try writer.print("  {s: <34} {s} ({s})\n", .{ "Type:", @tagName(self.header.e_type), switch (self.header.e_type) {
@@ -509,7 +509,7 @@ pub fn printRelocs(self: Elf, writer: anytype) !void {
 
         const raw = self.getSectionContents(shdr);
         const nrelocs = @divExact(shdr.sh_size, shdr.sh_entsize);
-        const relocs = @ptrCast([*]align(1) const elf.Elf64_Rela, raw.ptr)[0..nrelocs];
+        const relocs = @as([*]align(1) const elf.Elf64_Rela, @ptrCast(raw.ptr))[0..nrelocs];
 
         try writer.print("Relocation section '{s}' at offset 0x{x} contains {d} entries:\n", .{
             self.getShString(shdr.sh_name),
@@ -663,7 +663,7 @@ fn printSymtab(
                 else => {
                     const base_name = getString(strtab, sym.st_name);
                     if (is_dynsym and self.versymtab_index != null) {
-                        const versym = self.versymtab[@intCast(u32, i)] & VERSYM_VERSION;
+                        const versym = self.versymtab[@as(u32, @intCast(i))] & VERSYM_VERSION;
                         if (self.verdefsyms_lookup.get(versym)) |verdef_index| {
                             const verdef = self.verdefsyms.items[verdef_index];
                             const verdaux = self.verdefaux.items[verdef.aux];
@@ -720,7 +720,7 @@ fn printSymtab(
                 break :blk "UNKNOWN";
             },
         };
-        const sym_vis = @intToEnum(elf.STV, sym.st_other);
+        const sym_vis = @as(elf.STV, @enumFromInt(sym.st_other));
         const sym_ndx = blk: {
             if (elf.SHN_LORESERVE <= sym.st_shndx and sym.st_shndx < elf.SHN_HIRESERVE) {
                 if (elf.SHN_LOPROC <= sym.st_shndx and sym.st_shndx < elf.SHN_HIPROC) {
@@ -751,12 +751,12 @@ pub fn printDynamicSection(self: Elf, writer: anytype) !void {
         return writer.writeAll("There is no dynamic section in this file.");
     const data = self.getSectionContents(shdr);
     const nentries = @divExact(data.len, @sizeOf(elf.Elf64_Dyn));
-    const entries = @ptrCast([*]align(1) const elf.Elf64_Dyn, data.ptr)[0..nentries];
+    const entries = @as([*]align(1) const elf.Elf64_Dyn, @ptrCast(data.ptr))[0..nentries];
 
     try writer.print(" {s:<18} {s:<24} {s}\n", .{ "Tag", "Type", "Name/Value" });
 
     for (entries) |entry| {
-        const key = @bitCast(u64, entry.d_tag);
+        const key = @as(u64, @bitCast(entry.d_tag));
         const value = entry.d_val;
 
         try writer.print("0x{x:0>16} {s:<22}", .{ key, fmtDynamicSectionType(key) });
@@ -767,7 +767,7 @@ pub fn printDynamicSection(self: Elf, writer: anytype) !void {
             elf.DT_RPATH,
             elf.DT_RUNPATH,
             => {
-                const name = getString(self.dynstrtab, @intCast(u32, value));
+                const name = getString(self.dynstrtab, @as(u32, @intCast(value)));
                 switch (key) {
                     elf.DT_NEEDED => try writer.writeAll(" Shared library: "),
                     elf.DT_SONAME => try writer.writeAll(" Library soname: "),
@@ -1128,7 +1128,7 @@ fn getDynamicTable(self: Elf) []align(1) const elf.Elf64_Dyn {
     const shndx = self.dynamic_index orelse return &[0]elf.Elf64_Dyn{};
     const raw = self.getSectionContentsByIndex(shndx);
     const num = @divExact(raw.len, @sizeOf(elf.Elf64_Dyn));
-    return @ptrCast([*]align(1) const elf.Elf64_Dyn, raw.ptr)[0..num];
+    return @as([*]align(1) const elf.Elf64_Dyn, @ptrCast(raw.ptr))[0..num];
 }
 
 fn getVerdefNum(self: Elf) u64 {
@@ -1151,7 +1151,7 @@ fn getVerneedNum(self: Elf) u64 {
 
 fn findSymbolByAddress(self: Elf, addr: u64) ?u32 {
     for (self.symtab, 0..) |sym, idx| {
-        if (sym.st_value <= addr and addr < sym.st_value + sym.st_size) return @intCast(u32, idx);
+        if (sym.st_value <= addr and addr < sym.st_value + sym.st_size) return @as(u32, @intCast(idx));
     }
     return null;
 }
@@ -1166,13 +1166,13 @@ fn getShdrByType(self: Elf, sh_type: u32) ?elf.Elf64_Shdr {
 fn getShString(self: Elf, off: u32) []const u8 {
     if (self.shstrtab.len == 0) return "<no-strings>";
     assert(off < self.shstrtab.len);
-    return mem.sliceTo(@ptrCast([*:0]const u8, self.shstrtab.ptr + off), 0);
+    return mem.sliceTo(@as([*:0]const u8, @ptrCast(self.shstrtab.ptr + off)), 0);
 }
 
 fn getString(strtab: []const u8, off: u32) []const u8 {
     if (strtab.len == 0) return "<no-strings>";
     assert(off < strtab.len);
-    return mem.sliceTo(@ptrCast([*:0]const u8, strtab.ptr + off), 0);
+    return mem.sliceTo(@as([*:0]const u8, @ptrCast(strtab.ptr + off)), 0);
 }
 
 inline fn getSectionContents(self: Elf, shdr: elf.Elf64_Shdr) []const u8 {
