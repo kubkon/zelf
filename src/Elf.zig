@@ -70,15 +70,15 @@ pub fn parse(self: *Elf) !void {
             self.dynamic_index = @as(u32, @intCast(i));
         },
 
-        0x6ffffffd => { // VERDEF
+        elf.SHT_GNU_VERDEF => {
             self.verdef_index = @as(u32, @intCast(i));
         },
 
-        0x6ffffffe => { // VERNEED
+        elf.SHT_GNU_VERNEED => {
             self.verneed_index = @as(u32, @intCast(i));
         },
 
-        0x6fffffff => { // VERSYM
+        elf.SHT_GNU_VERSYM => {
             self.versymtab_index = @as(u32, @intCast(i));
             const raw = self.getSectionContents(shdr);
             const nsyms = @divExact(raw.len, @sizeOf(elf.Elf64_Versym));
@@ -663,7 +663,7 @@ fn printSymtab(
                 else => {
                     const base_name = getString(strtab, sym.st_name);
                     if (is_dynsym and self.versymtab_index != null) {
-                        const versym = self.versymtab[@as(u32, @intCast(i))] & VERSYM_VERSION;
+                        const versym = self.versymtab[@as(u32, @intCast(i))] & elf.VERSYM_VERSION;
                         if (self.verdefsyms_lookup.get(versym)) |verdef_index| {
                             const verdef = self.verdefsyms.items[verdef_index];
                             const verdaux = self.verdefaux.items[verdef.aux];
@@ -807,43 +807,43 @@ pub fn printDynamicSection(self: Elf, writer: anytype) !void {
             elf.DT_PLTREL => try writer.print(" {s}", .{fmtDynamicSectionType(value)}),
 
             elf.DT_FLAGS => if (value > 0) {
-                if (value & DF_ORIGIN != 0) try writer.writeAll(" ORIGIN");
-                if (value & DF_SYMBOLIC != 0) try writer.writeAll(" SYMBOLIC");
-                if (value & DF_TEXTREL != 0) try writer.writeAll(" TEXTREL");
-                if (value & DF_BIND_NOW != 0) try writer.writeAll(" BIND_NOW");
-                if (value & DF_STATIC_TLS != 0) try writer.writeAll(" STATIC_TLS");
+                if (value & elf.DF_ORIGIN != 0) try writer.writeAll(" ORIGIN");
+                if (value & elf.DF_SYMBOLIC != 0) try writer.writeAll(" SYMBOLIC");
+                if (value & elf.DF_TEXTREL != 0) try writer.writeAll(" TEXTREL");
+                if (value & elf.DF_BIND_NOW != 0) try writer.writeAll(" BIND_NOW");
+                if (value & elf.DF_STATIC_TLS != 0) try writer.writeAll(" STATIC_TLS");
             } else try writer.print(" {x}", .{value}),
 
             elf.DT_FLAGS_1 => if (value > 0) {
                 try writer.writeAll(" Flags:");
-                if (value & DF_1_NOW != 0) try writer.writeAll(" NOW");
-                if (value & DF_1_GLOBAL != 0) try writer.writeAll(" GLOBAL");
-                if (value & DF_1_GROUP != 0) try writer.writeAll(" GROUP");
-                if (value & DF_1_NODELETE != 0) try writer.writeAll(" NODELETE");
-                if (value & DF_1_LOADFLTR != 0) try writer.writeAll(" LOADFLTR");
-                if (value & DF_1_INITFIRST != 0) try writer.writeAll(" INITFIRST");
-                if (value & DF_1_NOOPEN != 0) try writer.writeAll(" NOOPEN");
-                if (value & DF_1_ORIGIN != 0) try writer.writeAll(" ORIGIN");
-                if (value & DF_1_DIRECT != 0) try writer.writeAll(" DIRECT");
-                if (value & DF_1_TRANS != 0) try writer.writeAll(" TRANS");
-                if (value & DF_1_INTERPOSE != 0) try writer.writeAll(" INTERPOSE");
-                if (value & DF_1_NODEFLIB != 0) try writer.writeAll(" NODEFLIB");
-                if (value & DF_1_NODUMP != 0) try writer.writeAll(" NODUMP");
-                if (value & DF_1_CONFALT != 0) try writer.writeAll(" CONFALT");
-                if (value & DF_1_ENDFILTEE != 0) try writer.writeAll(" ENDFILTEE");
-                if (value & DF_1_DISPRELDNE != 0) try writer.writeAll(" DISPRELDNE");
-                if (value & DF_1_DISPRELPND != 0) try writer.writeAll(" DISPRELPND");
-                if (value & DF_1_NODIRECT != 0) try writer.writeAll(" NODIRECT");
-                if (value & DF_1_IGNMULDEF != 0) try writer.writeAll(" IGNMULDEF");
-                if (value & DF_1_NOKSYMS != 0) try writer.writeAll(" NOKSYMS");
-                if (value & DF_1_NOHDR != 0) try writer.writeAll(" NOHDR");
-                if (value & DF_1_EDITED != 0) try writer.writeAll(" EDITED");
-                if (value & DF_1_NORELOC != 0) try writer.writeAll(" NORELOC");
-                if (value & DF_1_SYMINTPOSE != 0) try writer.writeAll(" SYMINTPOSE");
-                if (value & DF_1_GLOBAUDIT != 0) try writer.writeAll(" GLOBAUDIT");
-                if (value & DF_1_SINGLETON != 0) try writer.writeAll(" SINGLETON");
-                if (value & DF_1_STUB != 0) try writer.writeAll(" STUB");
-                if (value & DF_1_PIE != 0) try writer.writeAll(" PIE");
+                if (value & elf.DF_1_NOW != 0) try writer.writeAll(" NOW");
+                if (value & elf.DF_1_GLOBAL != 0) try writer.writeAll(" GLOBAL");
+                if (value & elf.DF_1_GROUP != 0) try writer.writeAll(" GROUP");
+                if (value & elf.DF_1_NODELETE != 0) try writer.writeAll(" NODELETE");
+                if (value & elf.DF_1_LOADFLTR != 0) try writer.writeAll(" LOADFLTR");
+                if (value & elf.DF_1_INITFIRST != 0) try writer.writeAll(" INITFIRST");
+                if (value & elf.DF_1_NOOPEN != 0) try writer.writeAll(" NOOPEN");
+                if (value & elf.DF_1_ORIGIN != 0) try writer.writeAll(" ORIGIN");
+                if (value & elf.DF_1_DIRECT != 0) try writer.writeAll(" DIRECT");
+                if (value & elf.DF_1_TRANS != 0) try writer.writeAll(" TRANS");
+                if (value & elf.DF_1_INTERPOSE != 0) try writer.writeAll(" INTERPOSE");
+                if (value & elf.DF_1_NODEFLIB != 0) try writer.writeAll(" NODEFLIB");
+                if (value & elf.DF_1_NODUMP != 0) try writer.writeAll(" NODUMP");
+                if (value & elf.DF_1_CONFALT != 0) try writer.writeAll(" CONFALT");
+                if (value & elf.DF_1_ENDFILTEE != 0) try writer.writeAll(" ENDFILTEE");
+                if (value & elf.DF_1_DISPRELDNE != 0) try writer.writeAll(" DISPRELDNE");
+                if (value & elf.DF_1_DISPRELPND != 0) try writer.writeAll(" DISPRELPND");
+                if (value & elf.DF_1_NODIRECT != 0) try writer.writeAll(" NODIRECT");
+                if (value & elf.DF_1_IGNMULDEF != 0) try writer.writeAll(" IGNMULDEF");
+                if (value & elf.DF_1_NOKSYMS != 0) try writer.writeAll(" NOKSYMS");
+                if (value & elf.DF_1_NOHDR != 0) try writer.writeAll(" NOHDR");
+                if (value & elf.DF_1_EDITED != 0) try writer.writeAll(" EDITED");
+                if (value & elf.DF_1_NORELOC != 0) try writer.writeAll(" NORELOC");
+                if (value & elf.DF_1_SYMINTPOSE != 0) try writer.writeAll(" SYMINTPOSE");
+                if (value & elf.DF_1_GLOBAUDIT != 0) try writer.writeAll(" GLOBAUDIT");
+                if (value & elf.DF_1_SINGLETON != 0) try writer.writeAll(" SINGLETON");
+                if (value & elf.DF_1_STUB != 0) try writer.writeAll(" STUB");
+                if (value & elf.DF_1_PIE != 0) try writer.writeAll(" PIE");
             } else try writer.print(" {x}", .{value}),
 
             elf.DT_RELACOUNT => try writer.print(" {d}", .{value}),
@@ -854,41 +854,6 @@ pub fn printDynamicSection(self: Elf, writer: anytype) !void {
         try writer.writeByte('\n');
     }
 }
-
-pub const DF_ORIGIN = 0x00000001;
-pub const DF_SYMBOLIC = 0x00000002;
-pub const DF_TEXTREL = 0x00000004;
-pub const DF_BIND_NOW = 0x00000008;
-pub const DF_STATIC_TLS = 0x00000010;
-
-pub const DF_1_NOW = 0x00000001;
-pub const DF_1_GLOBAL = 0x00000002;
-pub const DF_1_GROUP = 0x00000004;
-pub const DF_1_NODELETE = 0x00000008;
-pub const DF_1_LOADFLTR = 0x00000010;
-pub const DF_1_INITFIRST = 0x00000020;
-pub const DF_1_NOOPEN = 0x00000040;
-pub const DF_1_ORIGIN = 0x00000080;
-pub const DF_1_DIRECT = 0x00000100;
-pub const DF_1_TRANS = 0x00000200;
-pub const DF_1_INTERPOSE = 0x00000400;
-pub const DF_1_NODEFLIB = 0x00000800;
-pub const DF_1_NODUMP = 0x00001000;
-pub const DF_1_CONFALT = 0x00002000;
-pub const DF_1_ENDFILTEE = 0x00004000;
-pub const DF_1_DISPRELDNE = 0x00008000;
-pub const DF_1_DISPRELPND = 0x00010000;
-pub const DF_1_NODIRECT = 0x00020000;
-pub const DF_1_IGNMULDEF = 0x00040000;
-pub const DF_1_NOKSYMS = 0x00080000;
-pub const DF_1_NOHDR = 0x00100000;
-pub const DF_1_EDITED = 0x00200000;
-pub const DF_1_NORELOC = 0x00400000;
-pub const DF_1_SYMINTPOSE = 0x00800000;
-pub const DF_1_GLOBAUDIT = 0x01000000;
-pub const DF_1_SINGLETON = 0x02000000;
-pub const DF_1_STUB = 0x04000000;
-pub const DF_1_PIE = 0x08000000;
 
 fn fmtDynamicSectionType(@"type": u64) std.fmt.Formatter(formatDynamicSectionType) {
     return .{ .data = @"type" };
@@ -1001,10 +966,10 @@ pub fn printVersionSections(self: Elf, writer: anytype) !void {
             try writer.print("  {x:0>4}", .{count});
 
             for (remaining[0..num]) |versym| {
-                const actual_versym = versym & VERSYM_VERSION;
+                const actual_versym = versym & elf.VERSYM_VERSION;
                 const name = switch (actual_versym) {
-                    VER_NDX_LOCAL => "*local*",
-                    VER_NDX_GLOBAL => "*global*",
+                    elf.VER_NDX_LOCAL => "*local*",
+                    elf.VER_NDX_GLOBAL => "*global*",
                     else => blk: {
                         if (self.verdefsyms_lookup.get(actual_versym)) |verdef_index| {
                             const verdef = self.verdefsyms.items[verdef_index];
@@ -1018,7 +983,7 @@ pub fn printVersionSections(self: Elf, writer: anytype) !void {
                         break :blk try std.fmt.allocPrint(self.arena, "unknown({d})", .{actual_versym});
                     },
                 };
-                const hidden = versym & VERSYM_HIDDEN != 0;
+                const hidden = versym & elf.VERSYM_HIDDEN != 0;
                 try writer.print(" {d: >4}{s}({s})", .{ actual_versym, if (hidden) "h" else " ", name });
             }
 
@@ -1047,8 +1012,8 @@ pub fn printVersionSections(self: Elf, writer: anytype) !void {
                 verdef.sym.vd_version,
                 switch (verdef.sym.vd_flags) {
                     0 => "none",
-                    VER_FLG_BASE => "BASE",
-                    VER_FLG_WEAK => "WEAK",
+                    elf.VER_FLG_BASE => "BASE",
+                    elf.VER_FLG_WEAK => "WEAK",
                     else => "unknown",
                 },
                 verdef.sym.vd_ndx,
@@ -1096,8 +1061,8 @@ pub fn printVersionSections(self: Elf, writer: anytype) !void {
                     getString(self.dynstrtab, veraux.sym.vna_name),
                     switch (veraux.sym.vna_flags) {
                         0 => "none",
-                        VER_FLG_BASE => "BASE",
-                        VER_FLG_WEAK => "WEAK",
+                        elf.VER_FLG_BASE => "BASE",
+                        elf.VER_FLG_WEAK => "WEAK",
                         else => "unknown",
                     },
                     veraux.sym.vna_other,
@@ -1106,23 +1071,6 @@ pub fn printVersionSections(self: Elf, writer: anytype) !void {
         }
     }
 }
-
-const VERSYM_HIDDEN = 0x8000;
-const VERSYM_VERSION = 0x7fff;
-
-/// Symbol is local
-const VER_NDX_LOCAL = 0;
-/// Symbol is global
-const VER_NDX_GLOBAL = 1;
-/// Beginning of reserved entries
-const VER_NDX_LORESERVE = 0xff00;
-/// Symbol is to be eliminated
-const VER_NDX_ELIMINATE = 0xff01;
-
-/// Version definition of the file itself
-const VER_FLG_BASE = 1;
-/// Weak version identifier
-const VER_FLG_WEAK = 2;
 
 fn getDynamicTable(self: Elf) []align(1) const elf.Elf64_Dyn {
     const shndx = self.dynamic_index orelse return &[0]elf.Elf64_Dyn{};
