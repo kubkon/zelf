@@ -1,5 +1,6 @@
 arena: Allocator,
 data: []const u8,
+path: []const u8,
 opts: @import("main.zig").Options,
 
 header: elf.Elf64_Ehdr = undefined,
