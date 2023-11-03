@@ -1,7 +1,8 @@
 const std = @import("std");
 const fs = std.fs;
 
-const Elf = @import("Elf.zig");
+const Archive = @import("Archive.zig");
+const Object = @import("Object.zig");
 
 var global_alloc = std.heap.GeneralPurposeAllocator(.{}){};
 const gpa = global_alloc.allocator();
@@ -61,7 +62,7 @@ pub fn main() anyerror!void {
     if (args.len == 0) fatal(usage, .{});
 
     var filename: ?[]const u8 = null;
-    var opts: Elf.Options = .{};
+    var opts: Options = .{};
 
     const PrintMatrix = packed struct {
         header: bool = false,
@@ -159,50 +160,63 @@ pub fn main() anyerror!void {
     defer file.close();
     const data = try file.readToEndAlloc(arena, std.math.maxInt(u32));
 
-    var elf = Elf{ .arena = arena, .data = data, .opts = opts };
-    elf.parse() catch |err| switch (err) {
-        error.InvalidMagic => fatal("not an ELF file - invalid magic bytes", .{}),
-        else => |e| return e,
-    };
+    var objects = std.ArrayList(Object).init(arena);
+
+    if (try Archive.isArchive(fname)) {
+        @panic("TODO");
+    } else {
+        var object = Object{ .arena = arena, .data = data, .opts = opts };
+        object.parse() catch |err| switch (err) {
+            error.InvalidMagic => fatal("not an ELF file - invalid magic bytes", .{}),
+            else => |e| return e,
+        };
+        try objects.append(object);
+    }
 
     const stdout = std.io.getStdOut().writer();
 
     if (print_matrix.isSet()) fatal("no option specified", .{});
 
-    if (print_matrix.header) {
-        try elf.printHeader(stdout);
-        try stdout.writeAll("\n");
-    }
-    if (print_matrix.shdrs) {
-        try elf.printShdrs(stdout);
-        try stdout.writeAll("\n");
-    }
-    if (print_matrix.phdrs) {
-        try elf.printPhdrs(stdout);
-        try stdout.writeAll("\n");
-    }
-    if (print_matrix.relocs) {
-        try elf.printRelocs(stdout);
-        try stdout.writeAll("\n");
-    }
-    if (print_matrix.symbols) {
-        try elf.printSymbolTable(stdout);
-        try stdout.writeAll("\n");
-    }
-    if (print_matrix.dynamic_symbols) {
-        try elf.printDynamicSymbolTable(stdout);
-        try stdout.writeAll("\n");
-    }
-    if (print_matrix.dynamic_section) {
-        try elf.printDynamicSection(stdout);
-        try stdout.writeAll("\n");
-    }
-    if (print_matrix.initializers) {
-        try elf.printInitializers(stdout);
-        try stdout.writeAll("\n");
-    }
-    if (print_matrix.version_sections) {
-        try elf.printVersionSections(stdout);
-        try stdout.writeAll("\n");
+    for (objects.items) |object| {
+        if (print_matrix.header) {
+            try object.printHeader(stdout);
+            try stdout.writeAll("\n");
+        }
+        if (print_matrix.shdrs) {
+            try object.printShdrs(stdout);
+            try stdout.writeAll("\n");
+        }
+        if (print_matrix.phdrs) {
+            try object.printPhdrs(stdout);
+            try stdout.writeAll("\n");
+        }
+        if (print_matrix.relocs) {
+            try object.printRelocs(stdout);
+            try stdout.writeAll("\n");
+        }
+        if (print_matrix.symbols) {
+            try object.printSymbolTable(stdout);
+            try stdout.writeAll("\n");
+        }
+        if (print_matrix.dynamic_symbols) {
+            try object.printDynamicSymbolTable(stdout);
+            try stdout.writeAll("\n");
+        }
+        if (print_matrix.dynamic_section) {
+            try object.printDynamicSection(stdout);
+            try stdout.writeAll("\n");
+        }
+        if (print_matrix.initializers) {
+            try object.printInitializers(stdout);
+            try stdout.writeAll("\n");
+        }
+        if (print_matrix.version_sections) {
+            try object.printVersionSections(stdout);
+            try stdout.writeAll("\n");
+        }
     }
 }
+
+pub const Options = struct {
+    wide: bool = false,
+};
