@@ -74,6 +74,7 @@ pub fn main() anyerror!void {
             while (i < arg.len) : (i += 1) switch (arg[i]) {
                 '-' => break :blk,
                 'a' => tmp = PrintMatrix.enableAll(),
+                'c' => tmp.archive_index = true,
                 'h' => tmp.header = true,
                 'l' => tmp.phdrs = true,
                 'S' => tmp.shdrs = true,
@@ -114,6 +115,8 @@ pub fn main() anyerror!void {
             print_matrix.initializers = true;
         } else if (std.mem.eql(u8, arg, "--version-info")) {
             print_matrix.version_sections = true;
+        } else if (std.mem.eql(u8, arg, "--archive-index")) {
+            print_matrix.archive_index = true;
         } else if (std.mem.eql(u8, arg, "--wide")) {
             opts.wide = true;
         } else {
@@ -133,6 +136,10 @@ pub fn main() anyerror!void {
     if (try Archive.isArchive(fname)) {
         var archive = Archive{ .arena = arena, .data = data, .path = fname, .opts = opts };
         try archive.parse();
+        if (print_matrix.archive_index) {
+            try archive.printSymtab(stdout);
+            try stdout.writeAll("\n");
+        }
         for (archive.objects.items) |object| {
             try stdout.print("File: {s}({s})\n", .{ archive.path, object.path });
             try printObject(object, print_matrix, stdout);
@@ -192,6 +199,7 @@ pub const Options = struct {
 
 const PrintMatrix = packed struct {
     header: bool = false,
+    archive_index: bool = false,
     phdrs: bool = false,
     shdrs: bool = false,
     symbols: bool = false,
