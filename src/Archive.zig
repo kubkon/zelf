@@ -3,7 +3,7 @@ data: []const u8,
 path: []const u8,
 opts: @import("main.zig").Options,
 
-objects: std.ArrayListUnmanaged(Object) = .{},
+objects: std.AutoArrayHashMapUnmanaged(u64, Object) = .{},
 symtab: Symtab = .{},
 strtab: []const u8 = &[0]u8{},
 
@@ -25,6 +25,7 @@ pub fn parse(self: *Archive) !void {
         if (stream.pos >= self.data.len) break;
         if (!mem.isAligned(stream.pos, 2)) stream.pos += 1;
 
+        const pos = stream.pos;
         const hdr = try reader.readStruct(ar_hdr);
 
         if (!mem.eql(u8, &hdr.ar_fmag, ARFMAG)) return error.InvalidHeaderDelimiter;
@@ -43,24 +44,24 @@ pub fn parse(self: *Archive) !void {
             self.strtab = self.data[stream.pos..][0..size];
             continue;
         }
+        if (hdr.isSymdef() or hdr.isSymdefSorted()) {
+            // TODO
+            continue;
+        }
 
-        const name = ar_hdr.getValue(&hdr.ar_name);
+        const name = if (hdr.name()) |name|
+            try self.arena.dupe(u8, name)
+        else if (try hdr.nameOffset()) |off|
+            self.getString(off)
+        else
+            @panic("invalid name member"); // TODO this should be a user error
 
-        if (mem.eql(u8, name, "__.SYMDEF") or mem.eql(u8, name, "__.SYMDEF SORTED")) continue;
-
-        const object_name = blk: {
-            if (name[0] == '/') {
-                const off = try std.fmt.parseInt(u32, name[1..], 10);
-                const object_name = self.getString(off);
-                break :blk object_name[0 .. object_name.len - 1]; // To account for trailing '/'
-            }
-            break :blk try self.arena.dupe(u8, name);
-        };
-
-        const object = try self.objects.addOne(self.arena);
+        const gop = try self.objects.getOrPut(self.arena, pos);
+        assert(!gop.found_existing);
+        const object = gop.value_ptr;
         object.* = Object{
             .arena = self.arena,
-            .path = object_name,
+            .path = name,
             .data = self.data[stream.pos..][0..size],
             .opts = self.opts,
         };
@@ -94,7 +95,8 @@ pub fn printSymtab(self: Archive, writer: anytype) !void {
     }
 
     for (by_file.keys(), by_file.values()) |file, indexes| {
-        try writer.print("Contents of binary {s} at offset 0x{x}\n", .{ "TODO", file });
+        const object = self.objects.get(file).?;
+        try writer.print("Contents of binary {s}({s}) at offset 0x{x}\n", .{ self.path, object.path, file });
         for (indexes.items) |index| {
             try writer.print("      {s}\n", .{self.symtab.entries.items[index].name});
         }
@@ -103,7 +105,8 @@ pub fn printSymtab(self: Archive, writer: anytype) !void {
 
 fn getString(self: Archive, off: u32) []const u8 {
     assert(off < self.strtab.len);
-    return mem.sliceTo(@as([*:'\n']const u8, @ptrCast(self.strtab.ptr + off)), 0);
+    const name = mem.sliceTo(@as([*:'\n']const u8, @ptrCast(self.strtab.ptr + off)), 0);
+    return name[0 .. name.len - 1];
 }
 
 const ar_hdr = extern struct {
@@ -129,29 +132,47 @@ const ar_hdr = extern struct {
     ar_fmag: [2]u8,
 
     fn date(self: ar_hdr) !u64 {
-        const value = getValue(&self.ar_date);
+        const value = mem.trimRight(u8, &self.ar_date, &[_]u8{0x20});
         return std.fmt.parseInt(u64, value, 10);
     }
 
     fn size(self: ar_hdr) !u32 {
-        const value = getValue(&self.ar_size);
+        const value = mem.trimRight(u8, &self.ar_size, &[_]u8{0x20});
         return std.fmt.parseInt(u32, value, 10);
     }
 
-    fn getValue(raw: []const u8) []const u8 {
-        return mem.trimRight(u8, raw, &[_]u8{@as(u8, 0x20)});
-    }
-
     fn isStrtab(self: ar_hdr) bool {
-        return mem.eql(u8, getValue(&self.ar_name), STRNAME);
+        return mem.eql(u8, &self.ar_name, STRNAME);
     }
 
     fn isSymtab(self: ar_hdr) bool {
-        return mem.eql(u8, getValue(&self.ar_name), SYMNAME);
+        return mem.eql(u8, &self.ar_name, SYMNAME);
     }
 
     fn isSymtab64(self: ar_hdr) bool {
-        return mem.eql(u8, getValue(&self.ar_name), SYM64NAME);
+        return mem.eql(u8, &self.ar_name, SYM64NAME);
+    }
+
+    fn isSymdef(self: ar_hdr) bool {
+        return mem.eql(u8, &self.ar_name, SYMDEFNAME);
+    }
+
+    fn isSymdefSorted(self: ar_hdr) bool {
+        return mem.eql(u8, &self.ar_name, SYMDEFSORTEDNAME);
+    }
+
+    fn name(self: *const ar_hdr) ?[]const u8 {
+        const value = &self.ar_name;
+        if (value[0] == '/') return null;
+        const sentinel = mem.indexOfScalar(u8, value, '/') orelse value.len;
+        return value[0..sentinel];
+    }
+
+    fn nameOffset(self: ar_hdr) !?u32 {
+        const value = &self.ar_name;
+        if (value[0] != '/') return null;
+        const trimmed = mem.trimRight(u8, value, &[_]u8{0x20});
+        return try std.fmt.parseInt(u32, trimmed[1..], 10);
     }
 
     pub fn format(
@@ -244,12 +265,20 @@ const Symtab = struct {
     };
 };
 
-const ARMAG: *const [SARMAG:0]u8 = "!<arch>\n";
+fn genSpecialMemberName(comptime name: []const u8) *const [16]u8 {
+    assert(name.len <= 16);
+    const padding = 16 - name.len;
+    return name ++ &[_]u8{0x20} ** padding;
+}
+
+const ARMAG = "!<arch>\n";
 const SARMAG: u4 = 8;
-const ARFMAG: *const [2:0]u8 = "`\n";
-const SYMNAME: *const [1:0]u8 = "/";
-const STRNAME: *const [2:0]u8 = "//";
-const SYM64NAME: *const [7:0]u8 = "/SYM64/";
+const ARFMAG = "`\n";
+const SYMNAME = genSpecialMemberName("/");
+const STRNAME = genSpecialMemberName("//");
+const SYM64NAME = genSpecialMemberName("/SYM64/");
+const SYMDEFNAME = genSpecialMemberName("__.SYMDEF");
+const SYMDEFSORTEDNAME = genSpecialMemberName("__.SYMDEF SORTED");
 
 const assert = std.debug.assert;
 const mem = std.mem;

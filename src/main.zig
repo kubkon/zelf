@@ -141,7 +141,7 @@ pub fn main() anyerror!void {
             try stdout.writeAll("\n");
         }
         print_matrix.archive_index = false;
-        if (!print_matrix.isUnset()) for (archive.objects.items) |object| {
+        if (!print_matrix.isUnset()) for (archive.objects.values()) |object| {
             try stdout.print("File: {s}({s})\n", .{ archive.path, object.path });
             try printObject(object, print_matrix, stdout);
         };
