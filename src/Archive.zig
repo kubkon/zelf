@@ -11,7 +11,7 @@ pub fn isArchive(path: []const u8) !bool {
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
     const reader = file.reader();
-    const magic = reader.readBytesNoEof(SARMAG) catch return false;
+    const magic = reader.readBytesNoEof(ARMAG.len) catch return false;
     if (!mem.eql(u8, &magic, ARMAG)) return false;
     return true;
 }
@@ -19,7 +19,7 @@ pub fn isArchive(path: []const u8) !bool {
 pub fn parse(self: *Archive) !void {
     var stream = std.io.fixedBufferStream(self.data);
     const reader = stream.reader();
-    _ = try reader.readBytesNoEof(SARMAG);
+    _ = try reader.readBytesNoEof(ARMAG.len);
 
     while (true) {
         if (stream.pos >= self.data.len) break;
@@ -272,7 +272,6 @@ fn genSpecialMemberName(comptime name: []const u8) *const [16]u8 {
 }
 
 const ARMAG = "!<arch>\n";
-const SARMAG: u4 = 8;
 const ARFMAG = "`\n";
 const SYMNAME = genSpecialMemberName("/");
 const STRNAME = genSpecialMemberName("//");
