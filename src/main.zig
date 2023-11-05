@@ -131,7 +131,7 @@ pub fn main() anyerror!void {
     const data = try file.readToEndAlloc(arena, std.math.maxInt(u32));
 
     const stdout = std.io.getStdOut().writer();
-    if (print_matrix.isSet()) fatal("no option specified", .{});
+    if (print_matrix.isUnset()) fatal("no option specified", .{});
 
     if (try Archive.isArchive(fname)) {
         var archive = Archive{ .arena = arena, .data = data, .path = fname, .opts = opts };
@@ -140,10 +140,11 @@ pub fn main() anyerror!void {
             try archive.printSymtab(stdout);
             try stdout.writeAll("\n");
         }
-        for (archive.objects.items) |object| {
+        print_matrix.archive_index = false;
+        if (!print_matrix.isUnset()) for (archive.objects.items) |object| {
             try stdout.print("File: {s}({s})\n", .{ archive.path, object.path });
             try printObject(object, print_matrix, stdout);
-        }
+        };
     } else {
         var object = Object{ .arena = arena, .data = data, .path = fname, .opts = opts };
         object.parse() catch |err| switch (err) {
@@ -223,7 +224,7 @@ const PrintMatrix = packed struct {
         return @as(@This(), @bitCast(~@as(Int, 0)));
     }
 
-    fn isSet(pm: @This()) bool {
+    fn isUnset(pm: @This()) bool {
         return @as(Int, @bitCast(pm)) == 0;
     }
 
