@@ -35,7 +35,8 @@ pub fn parse(self: *Archive) !void {
         }
 
         if (hdr.isSymtab() or hdr.isSymtab64()) {
-            try self.parseSymtab(self.data[stream.pos..][0..size], hdr.isSymtab64());
+            self.symtab.format = if (hdr.isSymtab64()) .p64 else .p32;
+            try self.symtab.parse(self.arena, self.data[stream.pos..][0..size]);
             continue;
         }
         if (hdr.isStrtab()) {
@@ -69,33 +70,34 @@ pub fn parse(self: *Archive) !void {
 
 pub fn printSymtab(self: Archive, writer: anytype) !void {
     if (self.symtab.entries.items.len == 0) {
-        return writer.writeAll("no archive symbol table found\n");
-    }
-    try writer.print("{}\n", .{self.symtab});
-}
-
-fn parseSymtab(self: *Archive, data: []const u8, p64: bool) !void {
-    var stream = std.io.fixedBufferStream(data);
-    const reader = stream.reader();
-
-    const num = if (p64) try reader.readInt(u64, .big) else try reader.readInt(u32, .big);
-    try self.symtab.entries.ensureTotalCapacityPrecise(self.arena, num);
-
-    for (0..num) |_| {
-        const file = if (p64) try reader.readInt(u64, .big) else try reader.readInt(u32, .big);
-        self.symtab.entries.appendAssumeCapacity(.{ .name = undefined, .file = file });
+        return writer.writeAll("no index found in archive\n");
     }
 
-    const strtab_off = (num + 1) * @as(usize, if (p64) 8 else 4);
-    const strtab_len = data.len - strtab_off;
-    const strtab = data[strtab_off..];
+    var size_in_symtab: usize = 0;
+    for (self.symtab.entries.items) |entry| {
+        size_in_symtab += entry.name.len + 1;
+    }
+    try writer.print("Index of archive {s}: ({d} entries, 0x{x} bytes in the symbol table)\n", .{
+        self.path,
+        self.symtab.entries.items.len,
+        size_in_symtab,
+    });
 
-    var next: usize = 0;
-    var i: usize = 0;
-    while (i < strtab_len) : (next += 1) {
-        const name = mem.sliceTo(@as([*:0]const u8, @ptrCast(strtab.ptr + i)), 0);
-        self.symtab.entries.items[next].name = name;
-        i += name.len + 1;
+    // Sort by file
+    var by_file = std.AutoArrayHashMap(u64, std.ArrayList(usize)).init(self.arena);
+    for (self.symtab.entries.items, 0..) |entry, i| {
+        const gop = try by_file.getOrPut(entry.file);
+        if (!gop.found_existing) {
+            gop.value_ptr.* = std.ArrayList(usize).init(self.arena);
+        }
+        try gop.value_ptr.append(i);
+    }
+
+    for (by_file.keys(), by_file.values()) |file, indexes| {
+        try writer.print("Contents of binary {s} at offset 0x{x}\n", .{ "TODO", file });
+        for (indexes.items) |index| {
+            try writer.print("      {s}\n", .{self.symtab.entries.items[index].name});
+        }
     }
 }
 
@@ -193,22 +195,45 @@ const ar_hdr = extern struct {
 
 const Symtab = struct {
     entries: std.ArrayListUnmanaged(Entry) = .{},
+    format: enum { p32, p64 } = .p32,
 
-    pub fn deinit(ar: *Symtab, allocator: Allocator) void {
-        ar.symtab.deinit(allocator);
+    fn ptrWidth(ar: Symtab) usize {
+        return switch (ar.format) {
+            .p32 => @as(usize, 4),
+            .p64 => 8,
+        };
     }
 
-    pub fn format(
-        ar: Symtab,
-        comptime unused_fmt_string: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = unused_fmt_string;
-        _ = options;
-        for (ar.entries.items) |entry| {
-            try writer.print("  {s} 0x{x}\n", .{ entry.name, entry.file });
+    fn parse(ar: *Symtab, arena: Allocator, data: []const u8) !void {
+        var stream = std.io.fixedBufferStream(data);
+        const reader = stream.reader();
+
+        const num = try ar.readInt(reader);
+        try ar.entries.ensureTotalCapacityPrecise(arena, num);
+
+        for (0..num) |_| {
+            const file = try ar.readInt(reader);
+            ar.entries.appendAssumeCapacity(.{ .name = undefined, .file = file });
         }
+
+        const strtab_off = (num + 1) * ar.ptrWidth();
+        const strtab_len = data.len - strtab_off;
+        const strtab = data[strtab_off..];
+
+        var next: usize = 0;
+        var i: usize = 0;
+        while (i < strtab_len) : (next += 1) {
+            const name = mem.sliceTo(@as([*:0]const u8, @ptrCast(strtab.ptr + i)), 0);
+            ar.entries.items[next].name = name;
+            i += name.len + 1;
+        }
+    }
+
+    fn readInt(ar: Symtab, reader: anytype) !u64 {
+        return switch (ar.format) {
+            .p32 => @as(u64, @intCast(try reader.readInt(u32, .big))),
+            .p64 => try reader.readInt(u64, .big),
+        };
     }
 
     const Entry = struct {
