@@ -1,6 +1,7 @@
 arena: Allocator,
 data: []const u8,
-opts: Options,
+path: []const u8,
+opts: @import("main.zig").Options,
 
 header: elf.Elf64_Ehdr = undefined,
 shdrs: []align(1) const elf.Elf64_Shdr = &[0]elf.Elf64_Shdr{},
@@ -32,7 +33,7 @@ verneedsyms: std.ArrayListUnmanaged(VersionSym(elf.Elf64_Verneed)) = .{},
 verneedsyms_lookup: std.AutoHashMapUnmanaged(u32, u32) = .{},
 verneedaux: std.ArrayListUnmanaged(VersionSymAux(elf.Elf64_Vernaux)) = .{},
 
-pub fn parse(self: *Elf) !void {
+pub fn parse(self: *Object) !void {
     var stream = std.io.fixedBufferStream(self.data);
     const reader = stream.reader();
 
@@ -165,7 +166,7 @@ pub fn parse(self: *Elf) !void {
     }
 }
 
-pub fn printHeader(self: Elf, writer: anytype) !void {
+pub fn printHeader(self: Object, writer: anytype) !void {
     try writer.print("ELF Header:\n", .{});
 
     try writer.writeAll("  Magic:  ");
@@ -258,7 +259,7 @@ const ELFOSABI_STANDALONE = 255;
 
 const EI_ABIVERSION = 8;
 
-pub fn printShdrs(self: Elf, writer: anytype) !void {
+pub fn printShdrs(self: Object, writer: anytype) !void {
     const legend =
         \\Key to Flags:
         \\  W (write), A (alloc), X (execute), M (merge), S (strings), I (info),
@@ -385,7 +386,7 @@ pub fn printShdrs(self: Elf, writer: anytype) !void {
     try writer.writeAll(legend);
 }
 
-pub fn printPhdrs(self: Elf, writer: anytype) !void {
+pub fn printPhdrs(self: Object, writer: anytype) !void {
     if (self.phdrs.len == 0) return writer.print("There are no program headers in this file.\n", .{});
 
     try writer.print("Entry point 0x{x}\n", .{self.header.e_entry});
@@ -488,7 +489,7 @@ pub fn printPhdrs(self: Elf, writer: anytype) !void {
     }
 }
 
-pub fn printRelocs(self: Elf, writer: anytype) !void {
+pub fn printRelocs(self: Object, writer: anytype) !void {
     const has_relocs = for (self.shdrs) |shdr| switch (shdr.sh_type) {
         elf.SHT_RELA => break true,
         else => {},
@@ -547,7 +548,7 @@ pub fn printRelocs(self: Elf, writer: anytype) !void {
             if (reloc.r_addend >= 0) {
                 try writer.print("+ {x}", .{reloc.r_addend});
             } else {
-                try writer.print("- {x}", .{try std.math.absInt(reloc.r_addend)});
+                try writer.print("- {x}", .{@abs(reloc.r_addend)});
             }
             try writer.writeByte('\n');
         }
@@ -620,20 +621,20 @@ fn formatRelocType(
     }
 }
 
-pub fn printSymbolTable(self: Elf, writer: anytype) !void {
+pub fn printSymbolTable(self: Object, writer: anytype) !void {
     const ndx = self.symtab_index orelse
         return writer.print("There is no symbol table in this file.", .{});
     try self.printSymtab(ndx, self.symtab, self.strtab, writer);
 }
 
-pub fn printDynamicSymbolTable(self: Elf, writer: anytype) !void {
+pub fn printDynamicSymbolTable(self: Object, writer: anytype) !void {
     const ndx = self.dynsymtab_index orelse
         return writer.print("There is no dynamic symbol table in this file.", .{});
     try self.printSymtab(ndx, self.dynsymtab, self.dynstrtab, writer);
 }
 
 fn printSymtab(
-    self: Elf,
+    self: Object,
     shdr_ndx: u32,
     symtab: []align(1) const elf.Elf64_Sym,
     strtab: []align(1) const u8,
@@ -746,7 +747,7 @@ fn printSymtab(
     }
 }
 
-pub fn printDynamicSection(self: Elf, writer: anytype) !void {
+pub fn printDynamicSection(self: Object, writer: anytype) !void {
     const shdr = self.getShdrByType(elf.SHT_DYNAMIC) orelse
         return writer.writeAll("There is no dynamic section in this file.");
     const data = self.getSectionContents(shdr);
@@ -909,7 +910,7 @@ fn formatDynamicSectionType(
     }
 }
 
-pub fn printInitializers(self: Elf, writer: anytype) !void {
+pub fn printInitializers(self: Object, writer: anytype) !void {
     var no_inits = true;
     for (self.shdrs) |shdr| switch (shdr.sh_type) {
         elf.SHT_INIT_ARRAY, elf.SHT_FINI_ARRAY, elf.SHT_PREINIT_ARRAY => {
@@ -922,8 +923,8 @@ pub fn printInitializers(self: Elf, writer: anytype) !void {
                 const off = ientry * entry_size;
                 const entry = entries[off..][0..entry_size];
                 const value = switch (entry_size) {
-                    4 => mem.readIntLittle(u32, entry[0..4]),
-                    8 => mem.readIntLittle(u64, entry[0..8]),
+                    4 => mem.readInt(u32, entry[0..4], .little),
+                    8 => mem.readInt(u64, entry[0..8], .little),
                     else => unreachable,
                 };
                 const sym_index = self.findSymbolByAddress(value).?;
@@ -940,7 +941,7 @@ pub fn printInitializers(self: Elf, writer: anytype) !void {
     }
 }
 
-pub fn printVersionSections(self: Elf, writer: anytype) !void {
+pub fn printVersionSections(self: Object, writer: anytype) !void {
     if (self.versymtab_index == null) {
         return writer.writeAll("There are no version sections in this file.");
     }
@@ -1072,14 +1073,14 @@ pub fn printVersionSections(self: Elf, writer: anytype) !void {
     }
 }
 
-fn getDynamicTable(self: Elf) []align(1) const elf.Elf64_Dyn {
+fn getDynamicTable(self: Object) []align(1) const elf.Elf64_Dyn {
     const shndx = self.dynamic_index orelse return &[0]elf.Elf64_Dyn{};
     const raw = self.getSectionContentsByIndex(shndx);
     const num = @divExact(raw.len, @sizeOf(elf.Elf64_Dyn));
     return @as([*]align(1) const elf.Elf64_Dyn, @ptrCast(raw.ptr))[0..num];
 }
 
-fn getVerdefNum(self: Elf) u64 {
+fn getVerdefNum(self: Object) u64 {
     const dynamic = self.getDynamicTable();
     for (dynamic) |entry| switch (entry.d_tag) {
         elf.DT_VERDEFNUM => return entry.d_val,
@@ -1088,7 +1089,7 @@ fn getVerdefNum(self: Elf) u64 {
     return 0;
 }
 
-fn getVerneedNum(self: Elf) u64 {
+fn getVerneedNum(self: Object) u64 {
     const dynamic = self.getDynamicTable();
     for (dynamic) |entry| switch (entry.d_tag) {
         elf.DT_VERNEEDNUM => return entry.d_val,
@@ -1097,21 +1098,21 @@ fn getVerneedNum(self: Elf) u64 {
     return 0;
 }
 
-fn findSymbolByAddress(self: Elf, addr: u64) ?u32 {
+fn findSymbolByAddress(self: Object, addr: u64) ?u32 {
     for (self.symtab, 0..) |sym, idx| {
         if (sym.st_value <= addr and addr < sym.st_value + sym.st_size) return @as(u32, @intCast(idx));
     }
     return null;
 }
 
-fn getShdrByType(self: Elf, sh_type: u32) ?elf.Elf64_Shdr {
+fn getShdrByType(self: Object, sh_type: u32) ?elf.Elf64_Shdr {
     for (self.shdrs) |shdr| if (shdr.sh_type == sh_type) {
         return shdr;
     };
     return null;
 }
 
-fn getShString(self: Elf, off: u32) []const u8 {
+fn getShString(self: Object, off: u32) []const u8 {
     if (self.shstrtab.len == 0) return "<no-strings>";
     assert(off < self.shstrtab.len);
     return mem.sliceTo(@as([*:0]const u8, @ptrCast(self.shstrtab.ptr + off)), 0);
@@ -1123,11 +1124,11 @@ fn getString(strtab: []const u8, off: u32) []const u8 {
     return mem.sliceTo(@as([*:0]const u8, @ptrCast(strtab.ptr + off)), 0);
 }
 
-inline fn getSectionContents(self: Elf, shdr: elf.Elf64_Shdr) []const u8 {
+inline fn getSectionContents(self: Object, shdr: elf.Elf64_Shdr) []const u8 {
     return self.data[shdr.sh_offset..][0..shdr.sh_size];
 }
 
-fn getSectionContentsByIndex(self: Elf, shdr_index: u32) []const u8 {
+fn getSectionContentsByIndex(self: Object, shdr_index: u32) []const u8 {
     if (self.shdrs.len == 0) return &[0]u8{};
     assert(shdr_index < self.shdrs.len);
     const shdr = self.shdrs[shdr_index];
@@ -1151,10 +1152,6 @@ fn FormatName(comptime max_len: comptime_int) type {
     };
 }
 
-pub const Options = struct {
-    wide: bool = false,
-};
-
 fn VersionSym(comptime Inner: type) type {
     return struct {
         sym: Inner,
@@ -1170,7 +1167,7 @@ fn VersionSymAux(comptime Inner: type) type {
     };
 }
 
-const Elf = @This();
+const Object = @This();
 
 const std = @import("std");
 const assert = std.debug.assert;

@@ -1,7 +1,8 @@
 const std = @import("std");
 const fs = std.fs;
 
-const Elf = @import("Elf.zig");
+const Archive = @import("Archive.zig");
+const Object = @import("Object.zig");
 
 var global_alloc = std.heap.GeneralPurposeAllocator(.{}){};
 const gpa = global_alloc.allocator();
@@ -61,41 +62,8 @@ pub fn main() anyerror!void {
     if (args.len == 0) fatal(usage, .{});
 
     var filename: ?[]const u8 = null;
-    var opts: Elf.Options = .{};
+    var opts: Options = .{};
 
-    const PrintMatrix = packed struct {
-        header: bool = false,
-        phdrs: bool = false,
-        shdrs: bool = false,
-        symbols: bool = false,
-        dynamic_symbols: bool = false,
-        dynamic_section: bool = false,
-        relocs: bool = false,
-        initializers: bool = false,
-        version_sections: bool = false,
-
-        const Int = blk: {
-            const bits = @typeInfo(@This()).Struct.fields.len;
-            break :blk @Type(.{
-                .Int = .{
-                    .signedness = .unsigned,
-                    .bits = bits,
-                },
-            });
-        };
-
-        fn enableAll() @This() {
-            return @as(@This(), @bitCast(~@as(Int, 0)));
-        }
-
-        fn isSet(pm: @This()) bool {
-            return @as(Int, @bitCast(pm)) == 0;
-        }
-
-        fn add(pm: *@This(), other: @This()) void {
-            pm.* = @as(@This(), @bitCast(@as(Int, @bitCast(pm.*)) | @as(Int, @bitCast(other))));
-        }
-    };
     var print_matrix: PrintMatrix = .{};
 
     var it = ArgsIterator{ .args = args };
@@ -106,6 +74,7 @@ pub fn main() anyerror!void {
             while (i < arg.len) : (i += 1) switch (arg[i]) {
                 '-' => break :blk,
                 'a' => tmp = PrintMatrix.enableAll(),
+                'c' => tmp.archive_index = true,
                 'h' => tmp.header = true,
                 'l' => tmp.phdrs = true,
                 'S' => tmp.shdrs = true,
@@ -146,6 +115,8 @@ pub fn main() anyerror!void {
             print_matrix.initializers = true;
         } else if (std.mem.eql(u8, arg, "--version-info")) {
             print_matrix.version_sections = true;
+        } else if (std.mem.eql(u8, arg, "--archive-index")) {
+            print_matrix.archive_index = true;
         } else if (std.mem.eql(u8, arg, "--wide")) {
             opts.wide = true;
         } else {
@@ -159,50 +130,105 @@ pub fn main() anyerror!void {
     defer file.close();
     const data = try file.readToEndAlloc(arena, std.math.maxInt(u32));
 
-    var elf = Elf{ .arena = arena, .data = data, .opts = opts };
-    elf.parse() catch |err| switch (err) {
-        error.InvalidMagic => fatal("not an ELF file - invalid magic bytes", .{}),
-        else => |e| return e,
-    };
-
     const stdout = std.io.getStdOut().writer();
+    if (print_matrix.isUnset()) fatal("no option specified", .{});
 
-    if (print_matrix.isSet()) fatal("no option specified", .{});
+    if (try Archive.isArchive(fname)) {
+        var archive = Archive{ .arena = arena, .data = data, .path = fname, .opts = opts };
+        try archive.parse();
+        if (print_matrix.archive_index) {
+            try archive.printSymtab(stdout);
+            try stdout.writeAll("\n");
+        }
+        print_matrix.archive_index = false;
+        if (!print_matrix.isUnset()) for (archive.objects.values()) |object| {
+            try stdout.print("File: {s}({s})\n", .{ archive.path, object.path });
+            try printObject(object, print_matrix, stdout);
+        };
+    } else {
+        var object = Object{ .arena = arena, .data = data, .path = fname, .opts = opts };
+        object.parse() catch |err| switch (err) {
+            error.InvalidMagic => fatal("not an ELF file - invalid magic bytes", .{}),
+            else => |e| return e,
+        };
+        try printObject(object, print_matrix, stdout);
+    }
+}
 
+fn printObject(object: Object, print_matrix: PrintMatrix, stdout: anytype) !void {
     if (print_matrix.header) {
-        try elf.printHeader(stdout);
+        try object.printHeader(stdout);
         try stdout.writeAll("\n");
     }
     if (print_matrix.shdrs) {
-        try elf.printShdrs(stdout);
+        try object.printShdrs(stdout);
         try stdout.writeAll("\n");
     }
     if (print_matrix.phdrs) {
-        try elf.printPhdrs(stdout);
+        try object.printPhdrs(stdout);
         try stdout.writeAll("\n");
     }
     if (print_matrix.relocs) {
-        try elf.printRelocs(stdout);
+        try object.printRelocs(stdout);
         try stdout.writeAll("\n");
     }
     if (print_matrix.symbols) {
-        try elf.printSymbolTable(stdout);
+        try object.printSymbolTable(stdout);
         try stdout.writeAll("\n");
     }
     if (print_matrix.dynamic_symbols) {
-        try elf.printDynamicSymbolTable(stdout);
+        try object.printDynamicSymbolTable(stdout);
         try stdout.writeAll("\n");
     }
     if (print_matrix.dynamic_section) {
-        try elf.printDynamicSection(stdout);
+        try object.printDynamicSection(stdout);
         try stdout.writeAll("\n");
     }
     if (print_matrix.initializers) {
-        try elf.printInitializers(stdout);
+        try object.printInitializers(stdout);
         try stdout.writeAll("\n");
     }
     if (print_matrix.version_sections) {
-        try elf.printVersionSections(stdout);
+        try object.printVersionSections(stdout);
         try stdout.writeAll("\n");
     }
 }
+
+pub const Options = struct {
+    wide: bool = false,
+};
+
+const PrintMatrix = packed struct {
+    header: bool = false,
+    archive_index: bool = false,
+    phdrs: bool = false,
+    shdrs: bool = false,
+    symbols: bool = false,
+    dynamic_symbols: bool = false,
+    dynamic_section: bool = false,
+    relocs: bool = false,
+    initializers: bool = false,
+    version_sections: bool = false,
+
+    const Int = blk: {
+        const bits = @typeInfo(@This()).Struct.fields.len;
+        break :blk @Type(.{
+            .Int = .{
+                .signedness = .unsigned,
+                .bits = bits,
+            },
+        });
+    };
+
+    fn enableAll() @This() {
+        return @as(@This(), @bitCast(~@as(Int, 0)));
+    }
+
+    fn isUnset(pm: @This()) bool {
+        return @as(Int, @bitCast(pm)) == 0;
+    }
+
+    fn add(pm: *@This(), other: @This()) void {
+        pm.* = @as(@This(), @bitCast(@as(Int, @bitCast(pm.*)) | @as(Int, @bitCast(other))));
+    }
+};
