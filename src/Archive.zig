@@ -54,7 +54,7 @@ pub fn parse(self: *Archive) !void {
         else if (try hdr.nameOffset()) |off|
             self.getString(off)
         else
-            @panic("invalid name member"); // TODO this should be a user error
+            unreachable;
 
         const gop = try self.objects.getOrPut(self.arena, pos);
         assert(!gop.found_existing);
