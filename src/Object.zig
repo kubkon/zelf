@@ -616,8 +616,16 @@ fn formatRelocType(
     try writer.print("{s}", .{str});
     if (options.width) |width| {
         if (str.len > width) return error.NoSpaceLeft; // TODO how should we actually handle this here?
-        const fill = width - str.len;
-        if (fill > 0) try writer.writeByteNTimes(options.fill, fill);
+        const padding = width - str.len;
+        if (padding > 0) {
+            // TODO I have no idea what I'm doing here!
+            var fill_buffer: [4]u8 = undefined;
+            const fill = if (std.unicode.utf8Encode(options.fill, &fill_buffer)) |l|
+                fill_buffer[0..l]
+            else |_|
+                @panic("impossible to apply fmt fill!");
+            try writer.writeBytesNTimes(fill, padding);
+        }
     }
 }
 
@@ -905,8 +913,16 @@ fn formatDynamicSectionType(
     try writer.print("{s}", .{str});
     if (options.width) |width| {
         if (str.len > width) return error.NoSpaceLeft; // TODO how should we actually handle this here?
-        const fill = width - str.len;
-        if (fill > 0) try writer.writeByteNTimes(options.fill, fill);
+        const padding = width - str.len;
+        if (padding > 0) {
+            // TODO I have no idea what I'm doing here!
+            var fill_buffer: [4]u8 = undefined;
+            const fill = if (std.unicode.utf8Encode(options.fill, &fill_buffer)) |l|
+                fill_buffer[0..l]
+            else |_|
+                @panic("impossible to apply fmt fill!");
+            try writer.writeBytesNTimes(fill, padding);
+        }
     }
 }
 
