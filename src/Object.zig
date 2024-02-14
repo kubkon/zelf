@@ -577,33 +577,32 @@ fn formatRelocType(
     writer: anytype,
 ) !void {
     _ = unused_fmt_string;
+    const r_type = ctx.r_type;
     const object = ctx.object;
-    const e_machine = switch (object.header.e_machine) {
-        .NONE => "R_NONE",
-        .AARCH64 => "R_AARCH64_",
-        .X86_64 => "R_X86_64_",
-        else => "R_UNKNOWN",
-    };
-    try writer.writeAll(e_machine);
-    switch (object.header.e_machine) {
-        .AARCH64, .X86_64 => {},
-        else => return,
-    }
-    const r_type = switch (object.header.e_machine) {
-        .AARCH64 => @tagName(@as(elf.R_AARCH64, @enumFromInt(ctx.r_type))),
-        .X86_64 => @tagName(@as(elf.R_X86_64, @enumFromInt(ctx.r_type))),
+    const str = switch (object.header.e_machine) {
+        .X86_64 => blk: {
+            inline for (@typeInfo(R_X86_64).Enum.fields) |field| {
+                if (field.value == r_type) break :blk field.name;
+            }
+            unreachable;
+        },
+        .AARCH64 => blk: {
+            inline for (@typeInfo(R_AARCH64).Enum.fields) |field| {
+                if (field.value == r_type) break :blk field.name;
+            }
+            unreachable;
+        },
         else => unreachable,
     };
-    const total_len = r_type.len + e_machine.len;
-    const width = options.width orelse return writer.print("{s}", .{r_type});
+    const width = options.width orelse return writer.print("{s}", .{str});
     if (object.opts.wide) {
-        return writer.print("{s}", .{r_type});
+        return writer.print("{s}", .{str});
     }
-    if (total_len > width) {
-        try writer.print("{s}", .{r_type[0..@min(r_type.len, width - e_machine.len)]});
+    if (str.len > width) {
+        try writer.print("{s}", .{str[0..width]});
     } else {
-        try writer.print("{s}", .{r_type});
-        const padding = width - total_len;
+        try writer.print("{s}", .{str});
+        const padding = width - str.len;
         if (padding > 0) {
             // TODO I have no idea what I'm doing here!
             var fill_buffer: [4]u8 = undefined;
@@ -1169,6 +1168,30 @@ fn VersionSymAux(comptime Inner: type) type {
         off: u32,
     };
 }
+
+fn getRelocTypeByPrefix(comptime prefix: []const u8) type {
+    @setEvalBranchQuota(10000);
+    const elf_ti = @typeInfo(elf).Struct;
+    var decls: [elf_ti.decls.len]std.builtin.Type.EnumField = undefined;
+    var count = 0;
+    for (elf_ti.decls) |decl| {
+        if (mem.startsWith(u8, decl.name, prefix)) {
+            decls[count] = .{ .name = decl.name, .value = @field(elf, decl.name) };
+            count += 1;
+        }
+    }
+    return @Type(.{
+        .Enum = .{
+            .tag_type = u32,
+            .fields = decls[0..count],
+            .decls = &.{},
+            .is_exhaustive = true,
+        },
+    });
+}
+
+const R_X86_64 = getRelocTypeByPrefix("R_X86_64_");
+const R_AARCH64 = getRelocTypeByPrefix("R_AARCH64_");
 
 const Object = @This();
 
