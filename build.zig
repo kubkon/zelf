@@ -4,11 +4,15 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const mode = b.standardOptimizeOption(.{});
 
+    const use_llvm = b.option(bool, "use-llvm", "Whether to use LLVM") orelse true;
+
     const exe = b.addExecutable(.{
         .name = "zelf",
         .root_source_file = .{ .path = "src/main.zig" },
         .target = target,
         .optimize = mode,
+        .use_llvm = use_llvm,
+        .use_lld = use_llvm,
     });
     b.installArtifact(exe);
 
