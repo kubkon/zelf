@@ -225,6 +225,7 @@ pub fn printHeader(self: Object, writer: anytype) !void {
     try writer.print("  {s: <34} {s}\n", .{ "Machine:", switch (self.header.e_machine) {
         .NONE => "None",
         .X86_64 => "Advanced Micro Devices X86-64",
+        .AARCH64 => "Aarch64",
         else => "Unknown",
     } });
     try writer.print("  {s: <34} 0x{x}\n", .{ "Version:", self.header.e_version });
@@ -541,7 +542,7 @@ pub fn printRelocs(self: Object, writer: anytype) !void {
             try writer.print("{x:0>12} {x:0>12} {s: <24} {x:0>16} {s} ", .{
                 reloc.r_offset,
                 reloc.r_info,
-                fmtRelocType(reloc.r_type()),
+                fmtRelocType(reloc.r_type(), self),
                 sym.st_value,
                 sym_name,
             });
@@ -557,65 +558,50 @@ pub fn printRelocs(self: Object, writer: anytype) !void {
     }
 }
 
-fn fmtRelocType(r_type: u32) std.fmt.Formatter(formatRelocType) {
-    return .{ .data = r_type };
+const FmtRelocTypeCtx = struct {
+    r_type: u32,
+    object: Object,
+};
+
+fn fmtRelocType(r_type: u32, object: Object) std.fmt.Formatter(formatRelocType) {
+    return .{ .data = .{
+        .r_type = r_type,
+        .object = object,
+    } };
 }
 
 fn formatRelocType(
-    r_type: u32,
+    ctx: FmtRelocTypeCtx,
     comptime unused_fmt_string: []const u8,
     options: std.fmt.FormatOptions,
     writer: anytype,
 ) !void {
     _ = unused_fmt_string;
-    const str = switch (r_type) {
-        elf.R_X86_64_NONE => "R_X86_64_NONE",
-        elf.R_X86_64_64 => "R_X86_64_64",
-        elf.R_X86_64_PC32 => "R_X86_64_PC32",
-        elf.R_X86_64_GOT32 => "R_X86_64_GOT32",
-        elf.R_X86_64_PLT32 => "R_X86_64_PLT32",
-        elf.R_X86_64_COPY => "R_X86_64_COPY",
-        elf.R_X86_64_GLOB_DAT => "R_X86_64_GLOB_DAT",
-        elf.R_X86_64_JUMP_SLOT => "R_X86_64_JUMP_SLOT",
-        elf.R_X86_64_RELATIVE => "R_X86_64_RELATIVE",
-        elf.R_X86_64_GOTPCREL => "R_X86_64_GOTPCREL",
-        elf.R_X86_64_32 => "R_X86_64_32",
-        elf.R_X86_64_32S => "R_X86_64_32S",
-        elf.R_X86_64_16 => "R_X86_64_16",
-        elf.R_X86_64_PC16 => "R_X86_64_PC16",
-        elf.R_X86_64_8 => "R_X86_64_8",
-        elf.R_X86_64_PC8 => "R_X86_64_PC8",
-        elf.R_X86_64_DTPMOD64 => "R_X86_64_DTPMOD64",
-        elf.R_X86_64_DTPOFF64 => "R_X86_64_DTPOFF64",
-        elf.R_X86_64_TPOFF64 => "R_X86_64_TPOFF64",
-        elf.R_X86_64_TLSGD => "R_X86_64_TLSGD",
-        elf.R_X86_64_TLSLD => "R_X86_64_TLSLD",
-        elf.R_X86_64_DTPOFF32 => "R_X86_64_DTPOFF32",
-        elf.R_X86_64_GOTTPOFF => "R_X86_64_GOTTPOFF",
-        elf.R_X86_64_TPOFF32 => "R_X86_64_TPOFF32",
-        elf.R_X86_64_PC64 => "R_X86_64_PC64",
-        elf.R_X86_64_GOTOFF64 => "R_X86_64_GOTOFF64",
-        elf.R_X86_64_GOTPC32 => "R_X86_64_GOTPC32",
-        elf.R_X86_64_GOT64 => "R_X86_64_GOT64",
-        elf.R_X86_64_GOTPCREL64 => "R_X86_64_GOTPCREL64",
-        elf.R_X86_64_GOTPC64 => "R_X86_64_GOTPC64",
-        elf.R_X86_64_GOTPLT64 => "R_X86_64_GOTPLT64",
-        elf.R_X86_64_PLTOFF64 => "R_X86_64_PLTOFF64",
-        elf.R_X86_64_SIZE32 => "R_X86_64_SIZE32",
-        elf.R_X86_64_SIZE64 => "R_X86_64_SIZE64",
-        elf.R_X86_64_GOTPC32_TLSDESC => "R_X86_64_GOTPC32_TLSDESC",
-        elf.R_X86_64_TLSDESC_CALL => "R_X86_64_TLSDESC_CALL",
-        elf.R_X86_64_TLSDESC => "R_X86_64_TLSDESC",
-        elf.R_X86_64_IRELATIVE => "R_X86_64_IRELATIVE",
-        elf.R_X86_64_RELATIVE64 => "R_X86_64_RELATIVE64",
-        elf.R_X86_64_GOTPCRELX => "R_X86_64_GOTPCRELX",
-        elf.R_X86_64_REX_GOTPCRELX => "R_X86_64_REX_GOTPCRELX",
-        elf.R_X86_64_NUM => "R_X86_64_NUM",
-        else => "R_X86_64_UNKNOWN",
+    const r_type = ctx.r_type;
+    const object = ctx.object;
+    const str = switch (object.header.e_machine) {
+        .X86_64 => blk: {
+            inline for (@typeInfo(R_X86_64).Enum.fields) |field| {
+                if (field.value == r_type) break :blk field.name;
+            }
+            unreachable;
+        },
+        .AARCH64 => blk: {
+            inline for (@typeInfo(R_AARCH64).Enum.fields) |field| {
+                if (field.value == r_type) break :blk field.name;
+            }
+            unreachable;
+        },
+        else => unreachable,
     };
-    try writer.print("{s}", .{str});
-    if (options.width) |width| {
-        if (str.len > width) return error.NoSpaceLeft; // TODO how should we actually handle this here?
+    const width = options.width orelse return writer.print("{s}", .{str});
+    if (object.opts.wide) {
+        return writer.print("{s}", .{str});
+    }
+    if (str.len > width) {
+        try writer.print("{s}", .{str[0..width]});
+    } else {
+        try writer.print("{s}", .{str});
         const padding = width - str.len;
         if (padding > 0) {
             // TODO I have no idea what I'm doing here!
@@ -1182,6 +1168,30 @@ fn VersionSymAux(comptime Inner: type) type {
         off: u32,
     };
 }
+
+fn getRelocTypeByPrefix(comptime prefix: []const u8) type {
+    @setEvalBranchQuota(10000);
+    const elf_ti = @typeInfo(elf).Struct;
+    var decls: [elf_ti.decls.len]std.builtin.Type.EnumField = undefined;
+    var count = 0;
+    for (elf_ti.decls) |decl| {
+        if (mem.startsWith(u8, decl.name, prefix)) {
+            decls[count] = .{ .name = decl.name, .value = @field(elf, decl.name) };
+            count += 1;
+        }
+    }
+    return @Type(.{
+        .Enum = .{
+            .tag_type = u32,
+            .fields = decls[0..count],
+            .decls = &.{},
+            .is_exhaustive = true,
+        },
+    });
+}
+
+const R_X86_64 = getRelocTypeByPrefix("R_X86_64_");
+const R_AARCH64 = getRelocTypeByPrefix("R_AARCH64_");
 
 const Object = @This();
 
