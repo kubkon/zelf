@@ -225,6 +225,7 @@ pub fn printHeader(self: Object, writer: anytype) !void {
     try writer.print("  {s: <34} {s}\n", .{ "Machine:", switch (self.header.e_machine) {
         .NONE => "None",
         .X86_64 => "Advanced Micro Devices X86-64",
+        .AARCH64 => "Aarch64",
         else => "Unknown",
     } });
     try writer.print("  {s: <34} 0x{x}\n", .{ "Version:", self.header.e_version });
