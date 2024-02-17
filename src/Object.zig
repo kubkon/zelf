@@ -226,6 +226,7 @@ pub fn printHeader(self: Object, writer: anytype) !void {
         .NONE => "None",
         .X86_64 => "Advanced Micro Devices X86-64",
         .AARCH64 => "Aarch64",
+        .RISCV => "RISC-V",
         else => "Unknown",
     } });
     try writer.print("  {s: <34} 0x{x}\n", .{ "Version:", self.header.e_version });
@@ -582,11 +583,13 @@ fn formatRelocType(
     const prefix = switch (object.header.e_machine) {
         .X86_64 => "R_X86_64_",
         .AARCH64 => "R_AARCH64_",
+        .RISCV => "R_RISCV_",
         else => unreachable,
     };
     const suffix = switch (object.header.e_machine) {
         .X86_64 => @tagName(@as(elf.R_X86_64, @enumFromInt(r_type))),
         .AARCH64 => @tagName(@as(elf.R_AARCH64, @enumFromInt(r_type))),
+        .RISCV => @tagName(@as(elf.R_RISCV, @enumFromInt(r_type))),
         else => unreachable,
     };
     const width = options.width orelse return writer.print("{s}{s}", .{ prefix, suffix });
