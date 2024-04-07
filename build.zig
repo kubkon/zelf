@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
@@ -5,6 +6,7 @@ pub fn build(b: *std.Build) void {
     const mode = b.standardOptimizeOption(.{});
 
     const use_llvm = b.option(bool, "use-llvm", "Whether to use LLVM") orelse true;
+    const use_lld = if (builtin.target.isDarwin()) false else use_llvm;
 
     const exe = b.addExecutable(.{
         .name = "zelf",
@@ -12,7 +14,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = mode,
         .use_llvm = use_llvm,
-        .use_lld = use_llvm,
+        .use_lld = use_lld,
     });
     b.installArtifact(exe);
 
