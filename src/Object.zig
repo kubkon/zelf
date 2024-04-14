@@ -1074,6 +1074,12 @@ pub fn printVersionSections(self: Object, writer: anytype) !void {
     }
 }
 
+pub fn dumpSectionHex(self: Object, shndx: u32, writer: anytype) !void {
+    _ = self;
+    _ = shndx;
+    try writer.print("TODO\n", .{});
+}
+
 fn getDynamicTable(self: Object) []align(1) const elf.Elf64_Dyn {
     const shndx = self.dynamic_index orelse return &[0]elf.Elf64_Dyn{};
     const raw = self.getSectionContentsByIndex(shndx);
@@ -1134,6 +1140,13 @@ fn getSectionContentsByIndex(self: Object, shdr_index: u32) []const u8 {
     assert(shdr_index < self.shdrs.len);
     const shdr = self.shdrs[shdr_index];
     return self.getSectionContents(shdr);
+}
+
+pub fn getSectionByName(self: Object, name: []const u8) ?u32 {
+    for (self.shdrs, 0..) |shdr, shdr_index| {
+        if (mem.eql(u8, self.getShString(shdr.sh_name), name)) return @intCast(shdr_index);
+    }
+    return null;
 }
 
 const max_name_len = 16;
