@@ -1074,6 +1074,61 @@ pub fn printVersionSections(self: Object, writer: anytype) !void {
     }
 }
 
+pub fn dumpSectionHex(self: Object, shndx: u32, writer: anytype) !void {
+    const shdr = self.shdrs[shndx];
+    const name = self.getShString(shdr.sh_name);
+    const data = self.getSectionContentsByIndex(shndx);
+    try writer.print("Hex dump of section '{s}':\n", .{name});
+    try fmtBlobHex(data, writer);
+}
+
+// Format as 4 hex columns and 1 ascii column.
+// xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+fn fmtBlobHex(blob: []const u8, writer: anytype) !void {
+    const step = 16;
+    var hex_buf: [step]u8 = undefined;
+    var str_buf: [step]u8 = undefined;
+    var i: usize = 0;
+    while (i < blob.len) : (i += step) {
+        try writer.print("  0x{x:0>8} ", .{i});
+        const end = if (blob[i..].len >= step) step else blob[i..].len;
+        @memset(&hex_buf, 0);
+        @memcpy(hex_buf[0..end], blob[i .. i + end]);
+        var j: usize = 0;
+        while (j < step) : (j += 4) {
+            try writer.print("{x:<8} ", .{std.fmt.fmtSliceHexLower(hex_buf[j .. j + 4])});
+        }
+        _ = try std.fmt.bufPrint(&str_buf, "{s}", .{&hex_buf});
+        std.mem.replaceScalar(u8, &str_buf, 0, '.');
+        try writer.print("{s}\n", .{&str_buf});
+    }
+}
+
+pub fn dumpSectionStr(self: Object, shndx: u32, writer: anytype) !void {
+    const shdr = self.shdrs[shndx];
+    const name = self.getShString(shdr.sh_name);
+    const data = self.getSectionContentsByIndex(shndx);
+    try writer.print("String dump of section '{s}':\n", .{name});
+
+    const entsize = switch (shdr.sh_entsize) {
+        0, 1 => null,
+        else => |x| x,
+    };
+    var pos: usize = 0;
+    while (pos < data.len) {
+        try writer.print("  [{d: >6}]  ", .{pos});
+        if (entsize) |ent| {
+            const str = data.ptr[pos..][0..ent];
+            try writer.print("{s}\n", .{str});
+            pos += str.len;
+        } else {
+            const str = mem.sliceTo(@as([*:0]const u8, @ptrCast(data.ptr + pos)), 0);
+            try writer.print("{s}\n", .{str});
+            pos += str.len + 1;
+        }
+    }
+}
+
 fn getDynamicTable(self: Object) []align(1) const elf.Elf64_Dyn {
     const shndx = self.dynamic_index orelse return &[0]elf.Elf64_Dyn{};
     const raw = self.getSectionContentsByIndex(shndx);
@@ -1134,6 +1189,13 @@ fn getSectionContentsByIndex(self: Object, shdr_index: u32) []const u8 {
     assert(shdr_index < self.shdrs.len);
     const shdr = self.shdrs[shdr_index];
     return self.getSectionContents(shdr);
+}
+
+pub fn getSectionByName(self: Object, name: []const u8) ?u32 {
+    for (self.shdrs, 0..) |shdr, shdr_index| {
+        if (mem.eql(u8, self.getShString(shdr.sh_name), name)) return @intCast(shdr_index);
+    }
+    return null;
 }
 
 const max_name_len = 16;

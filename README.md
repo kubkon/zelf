@@ -9,18 +9,20 @@ Zig's ELF parsing utility - a replacement (maybe someday) utility for `readelf` 
 Usage: zelf [options] file
 
 General Options:
--a, --all                Equivalent of having all flags on
--h, --file-header        Display ELF file header
--l, --program-headers    Display program headers (if present)
--S, --section-headers    Display section headers
--s, --symbols            Display symbol table
-    --dyn-syms           Display the dynamic symbol table
--r, --relocs             Display relocations (if present)
--d, --dynamic            Display the dynamic section (if present)
---initializers           Display table(s) of initializers/finalizers (if present)
--V, --version-info       Display the version sections (if present)
--W, --wide               Do not shorten the names if too wide
---help                   Display this help and exit
+-a, --all                        Equivalent of having all flags on
+-h, --file-header                Display ELF file header
+-l, --program-headers            Display program headers (if present)
+-S, --section-headers            Display section headers
+-s, --symbols                    Display symbol table
+    --dyn-syms                   Display the dynamic symbol table
+-r, --relocs                     Display relocations (if present)
+-d, --dynamic                    Display the dynamic section (if present)
+--initializers                   Display table(s) of initializers/finalizers (if present)
+-p, --string-dump=<number|name>  Dump the contents of section <number|name> as strings
+-V, --version-info               Display the version sections (if present)
+-W, --wide                       Do not shorten the names if too wide
+-x, --hex-dump=<number|name>     Dump the contents of section <number|name> as bytes
+--help                           Display this help and exit
 ```
 
 Currently supported flags. More to come.
