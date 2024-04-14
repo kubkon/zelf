@@ -1075,9 +1075,33 @@ pub fn printVersionSections(self: Object, writer: anytype) !void {
 }
 
 pub fn dumpSectionHex(self: Object, shndx: u32, writer: anytype) !void {
-    _ = self;
-    _ = shndx;
-    try writer.print("TODO\n", .{});
+    const shdr = self.shdrs[shndx];
+    const name = self.getShString(shdr.sh_name);
+    const data = self.getSectionContentsByIndex(shndx);
+    try writer.print("Hex dump of section '{s}':\n", .{name});
+    try formatBinaryBlob(data, writer);
+}
+
+// Format as 4 hex columns and 1 ascii column.
+// xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+fn formatBinaryBlob(blob: []const u8, writer: anytype) !void {
+    const step = 16;
+    var hex_buf: [step]u8 = undefined;
+    var str_buf: [step]u8 = undefined;
+    var i: usize = 0;
+    while (i < blob.len) : (i += step) {
+        try writer.print("  0x{x:0>8} ", .{i});
+        const end = if (blob[i..].len >= step) step else blob[i..].len;
+        @memset(&hex_buf, 0);
+        @memcpy(hex_buf[0..end], blob[i .. i + end]);
+        var j: usize = 0;
+        while (j < step) : (j += 4) {
+            try writer.print("{x:<8} ", .{std.fmt.fmtSliceHexLower(hex_buf[j .. j + 4])});
+        }
+        _ = try std.fmt.bufPrint(&str_buf, "{s}", .{&hex_buf});
+        std.mem.replaceScalar(u8, &str_buf, 0, '.');
+        try writer.print("{s}\n", .{&str_buf});
+    }
 }
 
 fn getDynamicTable(self: Object) []align(1) const elf.Elf64_Dyn {
