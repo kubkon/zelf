@@ -11,19 +11,20 @@ const usage =
     \\Usage: zelf [options] file
     \\
     \\General Options:
-    \\-a, --all                      Equivalent of having all flags on
-    \\-h, --file-header              Display ELF file header
-    \\-l, --program-headers          Display program headers (if present)
-    \\-S, --section-headers          Display section headers
-    \\-s, --symbols                  Display symbol table
-    \\    --dyn-syms                 Display the dynamic symbol table
-    \\-r, --relocs                   Display relocations (if present)
-    \\-d, --dynamic                  Display the dynamic section (if present)
-    \\--initializers                 Display table(s) of initializers/finalizers (if present)
-    \\-V, --version-info             Display the version sections (if present)
-    \\-W, --wide                     Do not shorten the names if too wide
-    \\-x, --hex-dump=<number|name>   Dump the contents of section <number|name> as bytes
-    \\--help                         Display this help and exit
+    \\-a, --all                        Equivalent of having all flags on
+    \\-h, --file-header                Display ELF file header
+    \\-l, --program-headers            Display program headers (if present)
+    \\-S, --section-headers            Display section headers
+    \\-s, --symbols                    Display symbol table
+    \\    --dyn-syms                   Display the dynamic symbol table
+    \\-r, --relocs                     Display relocations (if present)
+    \\-d, --dynamic                    Display the dynamic section (if present)
+    \\--initializers                   Display table(s) of initializers/finalizers (if present)
+    \\-p, --string-dump=<number|name>  Dump the contents of section <number|name> as strings
+    \\-V, --version-info               Display the version sections (if present)
+    \\-W, --wide                       Do not shorten the names if too wide
+    \\-x, --hex-dump=<number|name>     Dump the contents of section <number|name> as bytes
+    \\--help                           Display this help and exit
     \\
 ;
 
@@ -198,6 +199,22 @@ pub fn main() anyerror!void {
                 print_matrix.hex_dump_str = true;
                 arg_data.hex_dump_str = value;
             }
+        } else if (p.arg1("p")) |value| {
+            if (std.fmt.parseUnsigned(u32, value, 0)) |num| {
+                print_matrix.str_dump_num = true;
+                arg_data.str_dump_num = num;
+            } else |_| {
+                print_matrix.str_dump_str = true;
+                arg_data.str_dump_str = value;
+            }
+        } else if (p.arg2("string-dump=")) |value| {
+            if (std.fmt.parseUnsigned(u32, value, 0)) |num| {
+                print_matrix.str_dump_num = true;
+                arg_data.str_dump_num = num;
+            } else |_| {
+                print_matrix.str_dump_str = true;
+                arg_data.str_dump_str = value;
+            }
         } else {
             if (filename != null) fatal("too many positional arguments specified", .{});
             filename = p.next_arg;
@@ -281,6 +298,16 @@ fn printObject(object: Object, print_matrix: PrintMatrix, arg_data: ArgData, std
         try object.dumpSectionHex(shndx, stdout);
         try stdout.writeAll("\n");
     }
+    if (print_matrix.str_dump_num) {
+        try object.dumpSectionStr(arg_data.str_dump_num, stdout);
+        try stdout.writeAll("\n");
+    }
+    if (print_matrix.str_dump_str) {
+        const shndx = object.getSectionByName(arg_data.str_dump_str) orelse
+            fatal("section '{s}' not found", .{arg_data.str_dump_str});
+        try object.dumpSectionStr(shndx, stdout);
+        try stdout.writeAll("\n");
+    }
 }
 
 pub const Options = struct {
@@ -300,6 +327,8 @@ const PrintMatrix = packed struct {
     version_sections: bool = false,
     hex_dump_num: bool = false,
     hex_dump_str: bool = false,
+    str_dump_num: bool = false,
+    str_dump_str: bool = false,
 
     const Int = blk: {
         const bits = @typeInfo(@This()).Struct.fields.len;
@@ -338,4 +367,6 @@ const PrintMatrix = packed struct {
 const ArgData = struct {
     hex_dump_num: u32 = 0,
     hex_dump_str: []const u8 = &[0]u8{},
+    str_dump_num: u32 = 0,
+    str_dump_str: []const u8 = &[0]u8{},
 };

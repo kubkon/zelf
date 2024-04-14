@@ -1079,12 +1079,12 @@ pub fn dumpSectionHex(self: Object, shndx: u32, writer: anytype) !void {
     const name = self.getShString(shdr.sh_name);
     const data = self.getSectionContentsByIndex(shndx);
     try writer.print("Hex dump of section '{s}':\n", .{name});
-    try formatBinaryBlob(data, writer);
+    try fmtBlobHex(data, writer);
 }
 
 // Format as 4 hex columns and 1 ascii column.
 // xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-fn formatBinaryBlob(blob: []const u8, writer: anytype) !void {
+fn fmtBlobHex(blob: []const u8, writer: anytype) !void {
     const step = 16;
     var hex_buf: [step]u8 = undefined;
     var str_buf: [step]u8 = undefined;
@@ -1101,6 +1101,31 @@ fn formatBinaryBlob(blob: []const u8, writer: anytype) !void {
         _ = try std.fmt.bufPrint(&str_buf, "{s}", .{&hex_buf});
         std.mem.replaceScalar(u8, &str_buf, 0, '.');
         try writer.print("{s}\n", .{&str_buf});
+    }
+}
+
+pub fn dumpSectionStr(self: Object, shndx: u32, writer: anytype) !void {
+    const shdr = self.shdrs[shndx];
+    const name = self.getShString(shdr.sh_name);
+    const data = self.getSectionContentsByIndex(shndx);
+    try writer.print("String dump of section '{s}':\n", .{name});
+
+    const entsize = switch (shdr.sh_entsize) {
+        0, 1 => null,
+        else => |x| x,
+    };
+    var pos: usize = 0;
+    while (pos < data.len) {
+        try writer.print("  [{d: >6}]  ", .{pos});
+        if (entsize) |ent| {
+            const str = data.ptr[pos..][0..ent];
+            try writer.print("{s}\n", .{str});
+            pos += str.len;
+        } else {
+            const str = mem.sliceTo(@as([*:0]const u8, @ptrCast(data.ptr + pos)), 0);
+            try writer.print("{s}\n", .{str});
+            pos += str.len + 1;
+        }
     }
 }
 
