@@ -1100,7 +1100,7 @@ fn fmtBlobHex(blob: []const u8, writer: anytype) !void {
         }
         _ = try std.fmt.bufPrint(&str_buf, "{s}", .{&hex_buf});
         std.mem.replaceScalar(u8, &str_buf, 0, '.');
-        try writer.print("{s}\n", .{&str_buf});
+        try writer.print("{s}\n", .{std.fmt.fmtSliceEscapeLower(&str_buf)});
     }
 }
 
@@ -1110,21 +1110,42 @@ pub fn dumpSectionStr(self: Object, shndx: u32, writer: anytype) !void {
     const data = self.getSectionContentsByIndex(shndx);
     try writer.print("String dump of section '{s}':\n", .{name});
 
-    const entsize = switch (shdr.sh_entsize) {
-        0, 1 => null,
-        else => |x| x,
-    };
-    var pos: usize = 0;
-    while (pos < data.len) {
-        try writer.print("  [{d: >6}]  ", .{pos});
-        if (entsize) |ent| {
-            const str = data.ptr[pos..][0..ent];
-            try writer.print("{s}\n", .{str});
-            pos += str.len;
-        } else {
-            const str = mem.sliceTo(@as([*:0]const u8, @ptrCast(data.ptr + pos)), 0);
-            try writer.print("{s}\n", .{str});
-            pos += str.len + 1;
+    if (shdr.sh_flags & elf.SHF_STRINGS != 0) {
+        const entsize: usize = switch (shdr.sh_entsize) {
+            0 => 1,
+            else => |x| @intCast(x),
+        };
+        const isNull = struct {
+            fn isNull(slice: []const u8) bool {
+                for (slice) |x| if (x != 0) return false;
+                return true;
+            }
+        }.isNull;
+
+        var start: usize = 0;
+        while (start < data.len) {
+            try writer.print("  [{x: >6}]  ", .{start});
+            var end = start;
+            while (end < data.len - entsize and !isNull(data[end .. end + entsize])) : (end += entsize) {}
+            if (!isNull(data[end .. end + entsize])) {
+                @panic("string not null terminated"); // TODO error
+            }
+            end += entsize;
+            const string = data[start..end];
+            try writer.print("{s}\n", .{std.fmt.fmtSliceEscapeLower(string)});
+            start = end;
+        }
+    } else {
+        const entsize = shdr.sh_entsize;
+        assert(entsize > 0); // TODO error
+        if (shdr.sh_size % entsize != 0) {
+            @panic("size not multiple of sh_entsize"); // TODO error
+        }
+        var pos: usize = 0;
+        while (pos < data.len) : (pos += entsize) {
+            try writer.print("  [{x: >6}]  ", .{pos});
+            const string = data.ptr[pos..][0..entsize];
+            try writer.print("{s}\n", .{std.fmt.fmtSliceEscapeLower(string)});
         }
     }
 }
