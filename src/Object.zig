@@ -4,22 +4,22 @@ path: []const u8,
 opts: @import("main.zig").Options,
 
 header: elf.Elf64_Ehdr = undefined,
-shdrs: []align(1) const elf.Elf64_Shdr = &[0]elf.Elf64_Shdr{},
-phdrs: []align(1) const elf.Elf64_Phdr = &[0]elf.Elf64_Phdr{},
+shdrs: std.ArrayListUnmanaged(elf.Elf64_Shdr) = .{},
+phdrs: std.ArrayListUnmanaged(elf.Elf64_Phdr) = .{},
 shstrtab: []const u8 = &[0]u8{},
 
 symtab_index: ?u32 = null,
-symtab: []align(1) const elf.Elf64_Sym = &[0]elf.Elf64_Sym{},
+symtab: std.ArrayListUnmanaged(elf.Elf64_Sym) = .{},
 strtab: []const u8 = &[0]u8{},
 
 dynamic_index: ?u32 = null,
 
 dynsymtab_index: ?u32 = null,
-dynsymtab: []align(1) const elf.Elf64_Sym = &[0]elf.Elf64_Sym{},
+dynsymtab: std.ArrayListUnmanaged(elf.Elf64_Sym) = .{},
 dynstrtab: []const u8 = &[0]u8{},
 
 versymtab_index: ?u32 = null,
-versymtab: []align(1) const elf.Elf64_Versym = &[0]elf.Elf64_Versym{},
+versymtab: std.ArrayListUnmanaged(elf.Elf64_Versym) = .{},
 
 verdef_index: ?u32 = null,
 verdefsyms: std.ArrayListUnmanaged(VersionSym(elf.Elf64_Verdef)) = .{},
@@ -38,29 +38,125 @@ pub fn parse(self: *Object) !void {
     const reader = stream.reader();
 
     self.header = try reader.readStruct(elf.Elf64_Ehdr);
-
     if (!mem.eql(u8, self.header.e_ident[0..4], "\x7fELF")) return error.InvalidMagic;
 
-    self.shdrs = @as([*]align(1) const elf.Elf64_Shdr, @ptrCast(self.data.ptr + self.header.e_shoff))[0..self.header.e_shnum];
-    self.phdrs = @as([*]align(1) const elf.Elf64_Phdr, @ptrCast(self.data.ptr + self.header.e_phoff))[0..self.header.e_phnum];
-    self.shstrtab = self.getSectionContentsByIndex(self.header.e_shstrndx);
+    if (self.is32Bit()) {
+        try stream.seekTo(0);
+        const header = try reader.readStruct(elf.Elf32_Ehdr);
+        @memcpy(&self.header.e_ident, &header.e_ident);
+        self.header.e_type = header.e_type;
+        self.header.e_machine = header.e_machine;
+        self.header.e_version = header.e_version;
+        self.header.e_entry = header.e_entry;
+        self.header.e_phoff = header.e_phoff;
+        self.header.e_shoff = header.e_shoff;
+        self.header.e_flags = header.e_flags;
+        self.header.e_ehsize = header.e_ehsize;
+        self.header.e_phentsize = header.e_phentsize;
+        self.header.e_phnum = header.e_phnum;
+        self.header.e_shentsize = header.e_shentsize;
+        self.header.e_shnum = header.e_shnum;
+        self.header.e_shstrndx = header.e_shstrndx;
+    }
 
-    for (self.shdrs, 0..) |shdr, i| switch (shdr.sh_type) {
+    try self.phdrs.ensureTotalCapacityPrecise(self.arena, self.header.e_phnum);
+    for (0..self.header.e_phnum) |i| {
+        const data = self.data[self.header.e_phoff + i * self.header.e_phentsize ..][0..self.header.e_phentsize];
+        const phdr: elf.Elf64_Phdr = if (self.is32Bit()) blk: {
+            const phdr = @as(*align(1) const elf.Elf32_Phdr, @ptrCast(data));
+            break :blk .{
+                .p_type = phdr.p_type,
+                .p_offset = phdr.p_offset,
+                .p_vaddr = phdr.p_vaddr,
+                .p_paddr = phdr.p_paddr,
+                .p_filesz = phdr.p_filesz,
+                .p_memsz = phdr.p_memsz,
+                .p_flags = phdr.p_flags,
+                .p_align = phdr.p_align,
+            };
+        } else @as(*align(1) const elf.Elf64_Phdr, @ptrCast(data)).*;
+        self.phdrs.appendAssumeCapacity(phdr);
+    }
+
+    const e_shnum = if (self.header.e_shnum == 0) blk: {
+        if (self.is32Bit()) {
+            const shdr = @as(*align(1) const elf.Elf32_Shdr, @ptrCast(self.data.ptr + self.header.e_shoff));
+            break :blk shdr.sh_size;
+        } else {
+            const shdr = @as(*align(1) const elf.Elf64_Shdr, @ptrCast(self.data.ptr + self.header.e_shoff));
+            break :blk shdr.sh_size;
+        }
+    } else self.header.e_shnum;
+
+    try self.shdrs.ensureTotalCapacityPrecise(self.arena, e_shnum);
+    for (0..e_shnum) |i| {
+        const data = self.data[self.header.e_shoff + i * self.header.e_shentsize ..][0..self.header.e_shentsize];
+        const shdr: elf.Elf64_Shdr = if (self.is32Bit()) blk: {
+            const shdr = @as(*align(1) const elf.Elf32_Shdr, @ptrCast(data));
+            break :blk .{
+                .sh_name = shdr.sh_name,
+                .sh_type = shdr.sh_type,
+                .sh_flags = shdr.sh_flags,
+                .sh_addr = shdr.sh_addr,
+                .sh_offset = shdr.sh_offset,
+                .sh_size = shdr.sh_size,
+                .sh_link = shdr.sh_link,
+                .sh_info = shdr.sh_info,
+                .sh_addralign = shdr.sh_addralign,
+                .sh_entsize = shdr.sh_entsize,
+            };
+        } else @as(*align(1) const elf.Elf64_Shdr, @ptrCast(data)).*;
+        self.shdrs.appendAssumeCapacity(shdr);
+    }
+
+    const e_shstrndx = if (self.header.e_shstrndx == elf.SHN_HIRESERVE) blk: {
+        if (self.is32Bit()) {
+            const shdr = @as(*align(1) const elf.Elf32_Shdr, @ptrCast(self.data.ptr + self.header.e_shoff));
+            break :blk shdr.sh_link;
+        } else {
+            const shdr = @as(*align(1) const elf.Elf64_Shdr, @ptrCast(self.data.ptr + self.header.e_shoff));
+            break :blk shdr.sh_link;
+        }
+    } else self.header.e_shstrndx;
+    self.shstrtab = self.getSectionContentsByIndex(e_shstrndx);
+
+    for (self.shdrs.items, 0..) |shdr, i| switch (shdr.sh_type) {
         elf.SHT_SYMTAB, elf.SHT_DYNSYM => {
             const raw = self.getSectionContents(shdr);
-            const nsyms = @divExact(raw.len, @sizeOf(elf.Elf64_Sym));
-            const symtab = @as([*]align(1) const elf.Elf64_Sym, @ptrCast(raw.ptr))[0..nsyms];
+            const sym_size: usize = if (self.is32Bit()) @sizeOf(elf.Elf32_Sym) else @sizeOf(elf.Elf64_Sym);
+            const nsyms = @divExact(raw.len, sym_size);
+            switch (shdr.sh_type) {
+                elf.SHT_SYMTAB => try self.symtab.ensureTotalCapacityPrecise(self.arena, nsyms),
+                elf.SHT_DYNSYM => try self.dynsymtab.ensureTotalCapacityPrecise(self.arena, nsyms),
+                else => unreachable,
+            }
+            for (0..nsyms) |si| {
+                const data = raw[si * sym_size ..][0..sym_size];
+                const out_sym: elf.Elf64_Sym = if (self.is32Bit()) blk: {
+                    const sym = @as(*align(1) const elf.Elf32_Sym, @ptrCast(data));
+                    break :blk .{
+                        .st_name = sym.st_name,
+                        .st_value = sym.st_value,
+                        .st_size = sym.st_size,
+                        .st_info = sym.st_info,
+                        .st_other = sym.st_other,
+                        .st_shndx = sym.st_shndx,
+                    };
+                } else @as(*align(1) const elf.Elf64_Sym, @ptrCast(data)).*;
+                switch (shdr.sh_type) {
+                    elf.SHT_SYMTAB => self.symtab.appendAssumeCapacity(out_sym),
+                    elf.SHT_DYNSYM => self.dynsymtab.appendAssumeCapacity(out_sym),
+                    else => unreachable,
+                }
+            }
             const strtab = self.getSectionContentsByIndex(shdr.sh_link);
-
             switch (shdr.sh_type) {
                 elf.SHT_SYMTAB => {
                     self.symtab_index = @as(u32, @intCast(i));
-                    self.symtab = symtab;
                     self.strtab = strtab;
                 },
                 elf.SHT_DYNSYM => {
                     self.dynsymtab_index = @as(u32, @intCast(i));
-                    self.dynsymtab = symtab;
                     self.dynstrtab = strtab;
                 },
                 else => unreachable,
@@ -83,14 +179,16 @@ pub fn parse(self: *Object) !void {
             self.versymtab_index = @as(u32, @intCast(i));
             const raw = self.getSectionContents(shdr);
             const nsyms = @divExact(raw.len, @sizeOf(elf.Elf64_Versym));
-            self.versymtab = @as([*]align(1) const elf.Elf64_Versym, @ptrCast(raw.ptr))[0..nsyms];
+            try self.versymtab.ensureTotalCapacityPrecise(self.arena, nsyms);
+            const versymtab = @as([*]align(1) const elf.Elf64_Versym, @ptrCast(raw.ptr))[0..nsyms];
+            self.versymtab.appendUnalignedSliceAssumeCapacity(versymtab);
         },
 
         else => {},
     };
 
     if (self.verdef_index) |shndx| {
-        const shdr = self.shdrs[shndx];
+        const shdr = self.shdrs.items[shndx];
         const raw = self.getSectionContents(shdr);
         const nsyms = @as(u32, @intCast(self.getVerdefNum()));
         try self.verdefsyms.ensureTotalCapacityPrecise(self.arena, nsyms);
@@ -100,7 +198,18 @@ pub fn parse(self: *Object) !void {
             var i: u32 = 0;
             var offset: u32 = 0;
             while (i < nsyms) : (i += 1) {
-                const verdefsym = @as(*align(1) const elf.Elf64_Verdef, @ptrCast(raw.ptr + offset)).*;
+                const verdefsym: elf.Elf64_Verdef = if (self.is32Bit()) blk: {
+                    const verdefsym = @as(*align(1) const elf.Elf32_Verdef, @ptrCast(raw.ptr + offset)).*;
+                    break :blk .{
+                        .vd_version = verdefsym.vd_version,
+                        .vd_flags = verdefsym.vd_flags,
+                        .vd_ndx = verdefsym.vd_ndx,
+                        .vd_cnt = verdefsym.vd_cnt,
+                        .vd_hash = verdefsym.vd_hash,
+                        .vd_aux = verdefsym.vd_aux,
+                        .vd_next = verdefsym.vd_next,
+                    };
+                } else @as(*align(1) const elf.Elf64_Verdef, @ptrCast(raw.ptr + offset)).*;
                 self.verdefsyms.appendAssumeCapacity(.{
                     .sym = verdefsym,
                     .off = offset,
@@ -120,7 +229,13 @@ pub fn parse(self: *Object) !void {
             var j: u32 = 0;
             var offset: u32 = verdefsym.off + verdefsym.sym.vd_aux;
             while (j < verdefsym.sym.vd_cnt) : (j += 1) {
-                const verdefaux = @as(*align(1) const elf.Elf64_Verdaux, @ptrCast(raw.ptr + offset)).*;
+                const verdefaux: elf.Elf64_Verdaux = if (self.is32Bit()) blk: {
+                    const verdefaux = @as(*align(1) const elf.Elf32_Verdaux, @ptrCast(raw.ptr + offset));
+                    break :blk .{
+                        .vda_name = verdefaux.vda_name,
+                        .vda_next = verdefaux.vda_next,
+                    };
+                } else @as(*align(1) const elf.Elf64_Verdaux, @ptrCast(raw.ptr + offset)).*;
                 self.verdefaux.appendAssumeCapacity(.{ .off = offset, .sym = verdefaux });
                 offset += verdefaux.vda_next;
             }
@@ -128,7 +243,7 @@ pub fn parse(self: *Object) !void {
     }
 
     if (self.verneed_index) |shndx| {
-        const shdr = self.shdrs[shndx];
+        const shdr = self.shdrs.items[shndx];
         const raw = self.getSectionContents(shdr);
         const nsyms = @as(u32, @intCast(self.getVerneedNum()));
         try self.verneedsyms.ensureTotalCapacityPrecise(self.arena, nsyms);
@@ -137,7 +252,16 @@ pub fn parse(self: *Object) !void {
             var i: u32 = 0;
             var offset: u32 = 0;
             while (i < nsyms) : (i += 1) {
-                const verneedsym = @as(*align(1) const elf.Elf64_Verneed, @ptrCast(raw.ptr + offset)).*;
+                const verneedsym: elf.Elf64_Verneed = if (self.is32Bit()) blk: {
+                    const verneedsym = @as(*align(1) const elf.Elf32_Verneed, @ptrCast(raw.ptr + offset));
+                    break :blk .{
+                        .vn_version = verneedsym.vn_version,
+                        .vn_cnt = verneedsym.vn_cnt,
+                        .vn_file = verneedsym.vn_file,
+                        .vn_aux = verneedsym.vn_aux,
+                        .vn_next = verneedsym.vn_next,
+                    };
+                } else @as(*align(1) const elf.Elf64_Verneed, @ptrCast(raw.ptr + offset)).*;
                 self.verneedsyms.appendAssumeCapacity(.{
                     .sym = verneedsym,
                     .off = offset,
@@ -157,7 +281,16 @@ pub fn parse(self: *Object) !void {
             var i: u32 = 0;
             var offset: u32 = verneedsym.off + verneedsym.sym.vn_aux;
             while (i < verneedsym.sym.vn_cnt) : (i += 1) {
-                const verneedaux = @as(*align(1) const elf.Elf64_Vernaux, @ptrCast(raw.ptr + offset)).*;
+                const verneedaux: elf.Elf64_Vernaux = if (self.is32Bit()) blk: {
+                    const verneedaux = @as(*align(1) const elf.Elf32_Vernaux, @ptrCast(raw.ptr + offset));
+                    break :blk .{
+                        .vna_hash = verneedaux.vna_hash,
+                        .vna_flags = verneedaux.vna_flags,
+                        .vna_other = verneedaux.vna_other,
+                        .vna_name = verneedaux.vna_name,
+                        .vna_next = verneedaux.vna_next,
+                    };
+                } else @as(*align(1) const elf.Elf64_Vernaux, @ptrCast(raw.ptr + offset)).*;
                 self.verneedaux.appendAssumeCapacity(.{ .off = offset, .sym = verneedaux });
                 offset += verneedaux.vna_next;
                 self.verneedsyms_lookup.putAssumeCapacityNoClobber(verneedaux.vna_other, aux + i);
@@ -281,7 +414,7 @@ pub fn printShdrs(self: Object, writer: anytype) !void {
 
     var sh_name_fmt = FormatName(max_name_len){ .wide = self.opts.wide };
 
-    for (self.shdrs, 0..) |shdr, i| {
+    for (self.shdrs.items, 0..) |shdr, i| {
         const sh_flags = shdr.sh_flags;
         const sh_name = self.getShString(shdr.sh_name);
         const sh_type = switch (shdr.sh_type) {
@@ -389,23 +522,23 @@ pub fn printShdrs(self: Object, writer: anytype) !void {
 }
 
 pub fn printPhdrs(self: Object, writer: anytype) !void {
-    if (self.phdrs.len == 0) return writer.print("There are no program headers in this file.\n", .{});
+    if (self.phdrs.items.len == 0) return writer.print("There are no program headers in this file.\n", .{});
 
     try writer.print("Entry point 0x{x}\n", .{self.header.e_entry});
     try writer.print("There are {d} program headers, starting at offset {d}\n\n", .{
-        self.phdrs.len,
+        self.phdrs.items.len,
         self.header.e_phoff,
     });
     try writer.print("Program Headers:\n", .{});
     try writer.print("  Type{s: <12} Offset{s: <10} VirtAddr{s: <8} PhysAddr{s: <8}\n", .{ "", "", "", "" });
     try writer.print("  {s: <16} FileSiz{s: <9} MemSiz{s: <10} Flags  Align\n", .{ "", "", "" });
 
-    var section_to_segment = try self.arena.alloc(std.ArrayList(usize), self.phdrs.len);
-    for (self.phdrs, 0..) |_, i| {
+    var section_to_segment = try self.arena.alloc(std.ArrayList(usize), self.phdrs.items.len);
+    for (self.phdrs.items, 0..) |_, i| {
         section_to_segment[i] = std.ArrayList(usize).init(self.arena);
     }
 
-    for (self.phdrs, 0..) |phdr, i| {
+    for (self.phdrs.items, 0..) |phdr, i| {
         const p_type = switch (phdr.p_type) {
             elf.PT_NULL => "NULL",
             elf.PT_LOAD => "LOAD",
@@ -464,7 +597,7 @@ pub fn printPhdrs(self: Object, writer: anytype) !void {
 
         const start_addr = phdr.p_vaddr;
         const end_addr = start_addr + phdr.p_memsz;
-        for (self.shdrs, 0..) |shdr, j| {
+        for (self.shdrs.items, 0..) |shdr, j| {
             if (start_addr <= shdr.sh_addr and shdr.sh_addr < end_addr) {
                 try section_to_segment[i].append(j);
             }
@@ -479,7 +612,8 @@ pub fn printPhdrs(self: Object, writer: anytype) !void {
         try writer.print("   {d:0>2}     ", .{i});
 
         for (ss.items, 0..) |shdr_ndx, x| {
-            const shdr = self.shdrs[shdr_ndx];
+            const shdr = self.shdrs.items[shdr_ndx];
+            if (shdr.sh_flags & elf.SHF_ALLOC == 0) continue;
             const shdr_name = self.getShString(shdr.sh_name);
             try writer.print("{s}", .{shdr_name});
             if (x < ss.items.len - 1) {
@@ -492,19 +626,19 @@ pub fn printPhdrs(self: Object, writer: anytype) !void {
 }
 
 pub fn printRelocs(self: Object, writer: anytype) !void {
-    const has_relocs = for (self.shdrs) |shdr| switch (shdr.sh_type) {
+    const has_relocs = for (self.shdrs.items) |shdr| switch (shdr.sh_type) {
         elf.SHT_RELA => break true,
         else => {},
     } else false;
     if (!has_relocs) return writer.print("There is no relocation info in this file.\n", .{});
 
     var last_shndx: usize = 0;
-    for (self.shdrs, 0..) |shdr, i| switch (shdr.sh_type) {
+    for (self.shdrs.items, 0..) |shdr, i| switch (shdr.sh_type) {
         elf.SHT_RELA => last_shndx = i,
         else => {},
     };
 
-    for (self.shdrs, 0..) |shdr, i| {
+    for (self.shdrs.items, 0..) |shdr, i| {
         switch (shdr.sh_type) {
             elf.SHT_RELA => {},
             else => continue,
@@ -512,6 +646,7 @@ pub fn printRelocs(self: Object, writer: anytype) !void {
 
         const raw = self.getSectionContents(shdr);
         const nrelocs = @divExact(shdr.sh_size, shdr.sh_entsize);
+        // TODO: 32bit
         const relocs = @as([*]align(1) const elf.Elf64_Rela, @ptrCast(raw.ptr))[0..nrelocs];
 
         try writer.print("Relocation section '{s}' at offset 0x{x} contains {d} entries:\n", .{
@@ -528,16 +663,16 @@ pub fn printRelocs(self: Object, writer: anytype) !void {
             var sym: elf.Elf64_Sym = undefined;
             var sym_name: []const u8 = undefined;
             if (self.symtab_index != null and shdr.sh_link == self.symtab_index.?) {
-                sym = self.symtab[reloc.r_sym()];
+                sym = self.symtab.items[reloc.r_sym()];
                 sym_name = blk: {
                     if (sym.st_name == 0 and sym.st_type() == elf.STT_SECTION) {
-                        const target_shdr = self.shdrs[sym.st_shndx];
+                        const target_shdr = self.shdrs.items[sym.st_shndx];
                         break :blk self.getShString(target_shdr.sh_name);
                     }
                     break :blk getString(self.strtab, sym.st_name);
                 };
             } else if (self.dynsymtab_index != null and shdr.sh_link == self.dynsymtab_index.?) {
-                sym = self.dynsymtab[reloc.r_sym()];
+                sym = self.dynsymtab.items[reloc.r_sym()];
                 sym_name = getString(self.dynstrtab, sym.st_name);
             } else unreachable;
             try writer.print("{x:0>12} {x:0>12} {s: <24} {x:0>16} {s} ", .{
@@ -617,13 +752,13 @@ fn formatRelocType(
 pub fn printSymbolTable(self: Object, writer: anytype) !void {
     const ndx = self.symtab_index orelse
         return writer.print("There is no symbol table in this file.", .{});
-    try self.printSymtab(ndx, self.symtab, self.strtab, writer);
+    try self.printSymtab(ndx, self.symtab.items, self.strtab, writer);
 }
 
 pub fn printDynamicSymbolTable(self: Object, writer: anytype) !void {
     const ndx = self.dynsymtab_index orelse
         return writer.print("There is no dynamic symbol table in this file.", .{});
-    try self.printSymtab(ndx, self.dynsymtab, self.dynstrtab, writer);
+    try self.printSymtab(ndx, self.dynsymtab.items, self.dynstrtab, writer);
 }
 
 fn printSymtab(
@@ -633,7 +768,7 @@ fn printSymtab(
     strtab: []align(1) const u8,
     writer: anytype,
 ) !void {
-    const shdr = self.shdrs[shdr_ndx];
+    const shdr = self.shdrs.items[shdr_ndx];
     const is_dynsym = shdr.sh_type == elf.SHT_DYNSYM;
 
     try writer.print("Symbol table '{s}' contains {d} entries:\n", .{
@@ -651,13 +786,13 @@ fn printSymtab(
         const sym_name = blk: {
             switch (sym.st_type()) {
                 elf.STT_SECTION => {
-                    const sym_shdr = self.shdrs[sym.st_shndx];
+                    const sym_shdr = self.shdrs.items[sym.st_shndx];
                     break :blk self.getShString(sym_shdr.sh_name);
                 },
                 else => {
                     const base_name = getString(strtab, sym.st_name);
                     if (is_dynsym and self.versymtab_index != null) {
-                        const versym = self.versymtab[@as(u32, @intCast(i))] & elf.VERSYM_VERSION;
+                        const versym = self.versymtab.items[@as(u32, @intCast(i))] & elf.VERSYM_VERSION;
                         if (self.verdefsyms_lookup.get(versym)) |verdef_index| {
                             const verdef = self.verdefsyms.items[verdef_index];
                             const verdaux = self.verdefaux.items[verdef.aux];
@@ -913,7 +1048,7 @@ fn formatDynamicSectionType(
 
 pub fn printInitializers(self: Object, writer: anytype) !void {
     var no_inits = true;
-    for (self.shdrs) |shdr| switch (shdr.sh_type) {
+    for (self.shdrs.items) |shdr| switch (shdr.sh_type) {
         elf.SHT_INIT_ARRAY, elf.SHT_FINI_ARRAY, elf.SHT_PREINIT_ARRAY => {
             try writer.print("{s}:\n", .{self.getShString(shdr.sh_name)});
             const entry_size = shdr.sh_entsize;
@@ -929,7 +1064,7 @@ pub fn printInitializers(self: Object, writer: anytype) !void {
                     else => unreachable,
                 };
                 const sym_index = self.findSymbolByAddress(value).?;
-                const name = getString(self.strtab, self.symtab[sym_index].st_name);
+                const name = getString(self.strtab, self.symtab.items[sym_index].st_name);
                 try writer.print("  {x:0>16}: {x:0>16}    {s}\n", .{ shdr.sh_addr + off, value, name });
             }
             no_inits = false;
@@ -948,21 +1083,21 @@ pub fn printVersionSections(self: Object, writer: anytype) !void {
     }
 
     if (self.versymtab_index) |shndx| {
-        const shdr = self.shdrs[shndx];
+        const shdr = self.shdrs.items[shndx];
         try writer.print("Version symbols section '{s}' contains {d} entries:\n", .{
             self.getShString(shdr.sh_name),
-            self.versymtab.len,
+            self.versymtab.items.len,
         });
         try writer.print(" Addr: 0x{x:0>16}  Offset: 0x{x:0>8}  Link: {d} ({s})\n", .{
             shdr.sh_addr,
             shdr.sh_offset,
             shdr.sh_link,
-            self.getShString(self.shdrs[shdr.sh_link].sh_name),
+            self.getShString(self.shdrs.items[shdr.sh_link].sh_name),
         });
 
         var count: usize = 0;
-        while (count < self.versymtab.len) : (count += 4) {
-            const remaining = self.versymtab[count..];
+        while (count < self.versymtab.items.len) : (count += 4) {
+            const remaining = self.versymtab.items[count..];
             const num = @min(remaining.len, 4);
 
             try writer.print("  {x:0>4}", .{count});
@@ -995,7 +1130,7 @@ pub fn printVersionSections(self: Object, writer: anytype) !void {
     }
 
     if (self.verdef_index) |shndx| {
-        const shdr = self.shdrs[shndx];
+        const shdr = self.shdrs.items[shndx];
         try writer.print("Version definition section '{s}' contains {d} entries:\n", .{
             self.getShString(shdr.sh_name),
             self.verdefsyms.items.len,
@@ -1004,7 +1139,7 @@ pub fn printVersionSections(self: Object, writer: anytype) !void {
             shdr.sh_addr,
             shdr.sh_offset,
             shdr.sh_link,
-            self.getShString(self.shdrs[shdr.sh_link].sh_name),
+            self.getShString(self.shdrs.items[shdr.sh_link].sh_name),
         });
 
         for (self.verdefsyms.items) |verdef| {
@@ -1036,7 +1171,7 @@ pub fn printVersionSections(self: Object, writer: anytype) !void {
     }
 
     if (self.verneed_index) |shndx| {
-        const shdr = self.shdrs[shndx];
+        const shdr = self.shdrs.items[shndx];
         try writer.print("Version needs section '{s}' contains {d} entries:\n", .{
             self.getShString(shdr.sh_name),
             self.verneedsyms.items.len,
@@ -1045,7 +1180,7 @@ pub fn printVersionSections(self: Object, writer: anytype) !void {
             shdr.sh_addr,
             shdr.sh_offset,
             shdr.sh_link,
-            self.getShString(self.shdrs[shdr.sh_link].sh_name),
+            self.getShString(self.shdrs.items[shdr.sh_link].sh_name),
         });
 
         for (self.verneedsyms.items) |verneed| {
@@ -1075,7 +1210,7 @@ pub fn printVersionSections(self: Object, writer: anytype) !void {
 }
 
 pub fn dumpSectionHex(self: Object, shndx: u32, writer: anytype) !void {
-    const shdr = self.shdrs[shndx];
+    const shdr = self.shdrs.items[shndx];
     const name = self.getShString(shdr.sh_name);
     const data = self.getSectionContentsByIndex(shndx);
     try writer.print("Hex dump of section '{s}':\n", .{name});
@@ -1105,7 +1240,7 @@ fn fmtBlobHex(blob: []const u8, writer: anytype) !void {
 }
 
 pub fn dumpSectionStr(self: Object, shndx: u32, writer: anytype) !void {
-    const shdr = self.shdrs[shndx];
+    const shdr = self.shdrs.items[shndx];
     const name = self.getShString(shdr.sh_name);
     const data = self.getSectionContentsByIndex(shndx);
     try writer.print("String dump of section '{s}':\n", .{name});
@@ -1176,14 +1311,14 @@ fn getVerneedNum(self: Object) u64 {
 }
 
 fn findSymbolByAddress(self: Object, addr: u64) ?u32 {
-    for (self.symtab, 0..) |sym, idx| {
+    for (self.symtab.items, 0..) |sym, idx| {
         if (sym.st_value <= addr and addr < sym.st_value + sym.st_size) return @as(u32, @intCast(idx));
     }
     return null;
 }
 
 fn getShdrByType(self: Object, sh_type: u32) ?elf.Elf64_Shdr {
-    for (self.shdrs) |shdr| if (shdr.sh_type == sh_type) {
+    for (self.shdrs.items) |shdr| if (shdr.sh_type == sh_type) {
         return shdr;
     };
     return null;
@@ -1206,17 +1341,21 @@ inline fn getSectionContents(self: Object, shdr: elf.Elf64_Shdr) []const u8 {
 }
 
 fn getSectionContentsByIndex(self: Object, shdr_index: u32) []const u8 {
-    if (self.shdrs.len == 0) return &[0]u8{};
-    assert(shdr_index < self.shdrs.len);
-    const shdr = self.shdrs[shdr_index];
+    if (self.shdrs.items.len == 0) return &[0]u8{};
+    assert(shdr_index < self.shdrs.items.len);
+    const shdr = self.shdrs.items[shdr_index];
     return self.getSectionContents(shdr);
 }
 
 pub fn getSectionByName(self: Object, name: []const u8) ?u32 {
-    for (self.shdrs, 0..) |shdr, shdr_index| {
+    for (self.shdrs.items, 0..) |shdr, shdr_index| {
         if (mem.eql(u8, self.getShString(shdr.sh_name), name)) return @intCast(shdr_index);
     }
     return null;
+}
+
+fn is32Bit(self: Object) bool {
+    return self.header.e_ident[elf.EI_CLASS] == elf.ELFCLASS32;
 }
 
 const max_name_len = 16;
