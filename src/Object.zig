@@ -627,27 +627,25 @@ pub fn printPhdrs(self: Object, writer: anytype) !void {
 
 pub fn printRelocs(self: Object, writer: anytype) !void {
     const has_relocs = for (self.shdrs.items) |shdr| switch (shdr.sh_type) {
-        elf.SHT_RELA => break true,
+        elf.SHT_RELA, elf.SHT_REL => break true,
         else => {},
     } else false;
     if (!has_relocs) return writer.print("There is no relocation info in this file.\n", .{});
 
     var last_shndx: usize = 0;
     for (self.shdrs.items, 0..) |shdr, i| switch (shdr.sh_type) {
-        elf.SHT_RELA => last_shndx = i,
+        elf.SHT_RELA, elf.SHT_REL => last_shndx = i,
         else => {},
     };
 
     for (self.shdrs.items, 0..) |shdr, i| {
-        switch (shdr.sh_type) {
-            elf.SHT_RELA => {},
+        const is_rela = switch (shdr.sh_type) {
+            elf.SHT_RELA => true,
+            elf.SHT_REL => false,
             else => continue,
-        }
-
+        };
         const raw = self.getSectionContents(shdr);
         const nrelocs = @divExact(shdr.sh_size, shdr.sh_entsize);
-        // TODO: 32bit
-        const relocs = @as([*]align(1) const elf.Elf64_Rela, @ptrCast(raw.ptr))[0..nrelocs];
 
         try writer.print("Relocation section '{s}' at offset 0x{x} contains {d} entries:\n", .{
             self.getShString(shdr.sh_name),
@@ -658,8 +656,40 @@ pub fn printRelocs(self: Object, writer: anytype) !void {
             "  Offset{s: <8}Info{s: <12}Type{s: <20}Sym. Value{s: <2}Sym. Name + Addend\n",
             .{ "", "", "", "" },
         );
+        if (!is_rela) {
+            try writer.writeAll("\n\nWARNING: TODO implement parsing addend for SHT_REL records\n\n");
+        }
 
-        for (relocs) |reloc| {
+        for (0..nrelocs) |ireloc| {
+            const data = raw[ireloc * shdr.sh_entsize ..][0..shdr.sh_entsize];
+            const reloc: elf.Elf64_Rela = if (self.is32Bit()) blk: {
+                if (is_rela) {
+                    const reloc = @as(*align(1) const elf.Elf32_Rela, @ptrCast(data)).*;
+                    break :blk .{
+                        .r_offset = reloc.r_offset,
+                        .r_info = reloc.r_info,
+                        .r_addend = reloc.r_addend,
+                    };
+                }
+                const reloc = @as(*align(1) const elf.Elf32_Rel, @ptrCast(data)).*;
+                const addend: u64 = 0; // TODO get addend based on machine type and reloc type
+                break :blk .{
+                    .r_offset = reloc.r_offset,
+                    .r_info = reloc.r_info,
+                    .r_addend = addend,
+                };
+            } else blk: {
+                if (is_rela) {
+                    break :blk @as(*align(1) const elf.Elf64_Rela, @ptrCast(data)).*;
+                }
+                const reloc = @as(*align(1) const elf.Elf64_Rel, @ptrCast(data)).*;
+                const addend: u64 = 0; // TODO get addend based on machine type and reloc type
+                break :blk .{
+                    .r_offset = reloc.r_offset,
+                    .r_info = reloc.r_info,
+                    .r_addend = addend,
+                };
+            };
             var sym: elf.Elf64_Sym = undefined;
             var sym_name: []const u8 = undefined;
             if (self.symtab_index != null and shdr.sh_link == self.symtab_index.?) {
