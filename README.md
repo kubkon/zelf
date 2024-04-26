@@ -1,7 +1,6 @@
 # zelf
 
 Zig's ELF parsing utility - a replacement (maybe someday) utility for `readelf` written in Zig.
-`zelf` currently supports parsing `x86_64` ELF files only.
 
 ## Usage
 
