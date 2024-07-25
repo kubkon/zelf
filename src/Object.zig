@@ -632,6 +632,7 @@ pub fn printSectionGroups(self: Object, writer: anytype) !void {
     } else false;
     if (!has_section_groups) return writer.print("There are no section groups in this file.\n", .{});
 
+    var first = true;
     for (self.shdrs.items, 0..) |shdr, i| switch (shdr.sh_type) {
         elf.SHT_GROUP => {
             const raw = self.getSectionContents(shdr);
@@ -653,6 +654,7 @@ pub fn printSectionGroups(self: Object, writer: anytype) !void {
                 self.getShString(self.shdrs.items[group_info_sym.st_shndx].sh_name)
             else
                 getString(self.strtab, group_info_sym.st_name);
+            if (!first) try writer.writeByte('\n');
             try writer.print("COMDAT group section [{d: >5}] `{s}' [{s}] contains {d} sections:\n", .{
                 i, self.getShString(shdr.sh_name), group_signature, num_members - 1,
             });
@@ -664,6 +666,7 @@ pub fn printSectionGroups(self: Object, writer: anytype) !void {
                 });
                 if (n < members.len - 1) try writer.writeByte('\n');
             }
+            first = false;
         },
         else => {},
     };
