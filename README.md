@@ -9,6 +9,7 @@ Usage: zelf [options] file
 
 General Options:
 -a, --all                        Equivalent of having all flags on
+-g, --section-groups             Display the section groups
 -h, --file-header                Display ELF file header
 -l, --program-headers            Display program headers (if present)
 -S, --section-headers            Display section headers
