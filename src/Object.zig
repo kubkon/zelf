@@ -625,6 +625,50 @@ pub fn printPhdrs(self: Object, writer: anytype) !void {
     }
 }
 
+pub fn printSectionGroups(self: Object, writer: anytype) !void {
+    const has_section_groups = for (self.shdrs.items) |shdr| switch (shdr.sh_type) {
+        elf.SHT_GROUP => break true,
+        else => {},
+    } else false;
+    if (!has_section_groups) return writer.print("There are no section groups in this file.\n", .{});
+
+    for (self.shdrs.items, 0..) |shdr, i| switch (shdr.sh_type) {
+        elf.SHT_GROUP => {
+            const raw = self.getSectionContents(shdr);
+            const num_members = std.math.divExact(usize, raw.len, @sizeOf(u32)) catch {
+                // TODO convert into an error
+                return writer.print("Section {d}, '{s}' does not divide by group member size.\n", .{
+                    i, self.getShString(shdr.sh_name),
+                });
+            };
+            if (num_members == 0) return writer.print("Empty section {d}, '{s}'.\n", .{
+                i, self.getShString(shdr.sh_name),
+            });
+            const members = @as([*]align(1) const u32, @ptrCast(raw.ptr))[0..num_members];
+            if (members[0] != elf.GRP_COMDAT) return writer.print("Unknown SHT_GROUP format in section {d}, '{s}'.\n", .{
+                i, self.getShString(shdr.sh_name),
+            });
+            const group_info_sym = self.symtab.items[shdr.sh_info];
+            const group_signature = if (group_info_sym.st_name == 0 and group_info_sym.st_type() == elf.STT_SECTION)
+                self.getShString(self.shdrs.items[group_info_sym.st_shndx].sh_name)
+            else
+                getString(self.strtab, group_info_sym.st_name);
+            try writer.print("COMDAT group section [{d: >5}] `{s}' [{s}] contains {d} sections:\n", .{
+                i, self.getShString(shdr.sh_name), group_signature, num_members - 1,
+            });
+            try writer.writeAll("   [Index]    Name\n");
+            for (members[1..], 1..) |shndx, n| {
+                try writer.print("   [{d: >5}]   {s}", .{
+                    shndx,
+                    self.getShString(self.shdrs.items[shndx].sh_name),
+                });
+                if (n < members.len - 1) try writer.writeByte('\n');
+            }
+        },
+        else => {},
+    };
+}
+
 pub fn printRelocs(self: Object, writer: anytype) !void {
     const has_relocs = for (self.shdrs.items) |shdr| switch (shdr.sh_type) {
         elf.SHT_RELA, elf.SHT_REL => break true,

@@ -12,6 +12,7 @@ const usage =
     \\
     \\General Options:
     \\-a, --all                        Equivalent of having all flags on
+    \\-g, --section-groups             Display the section groups
     \\-h, --file-header                Display ELF file header
     \\-l, --program-headers            Display program headers (if present)
     \\-S, --section-headers            Display section headers
@@ -139,6 +140,7 @@ pub fn main() anyerror!void {
                 '-' => break :blk,
                 'a' => tmp = PrintMatrix.enableAll(),
                 'c' => tmp.archive_index = true,
+                'g' => tmp.section_groups = true,
                 'h' => tmp.header = true,
                 'l' => tmp.phdrs = true,
                 'S' => tmp.shdrs = true,
@@ -166,6 +168,8 @@ pub fn main() anyerror!void {
             print_matrix.phdrs = true;
         } else if (p.flag2("section-headers")) {
             print_matrix.shdrs = true;
+        } else if (p.flag2("section-groups")) {
+            print_matrix.section_groups = true;
         } else if (p.flag2("symbols")) {
             print_matrix.dynamic_symbols = true;
             print_matrix.symbols = true;
@@ -264,6 +268,10 @@ fn printObject(object: Object, print_matrix: PrintMatrix, arg_data: ArgData, std
         try object.printPhdrs(stdout);
         try stdout.writeAll("\n");
     }
+    if (print_matrix.section_groups) {
+        try object.printSectionGroups(stdout);
+        try stdout.writeAll("\n");
+    }
     if (print_matrix.relocs) {
         try object.printRelocs(stdout);
         try stdout.writeAll("\n");
@@ -319,6 +327,7 @@ const PrintMatrix = packed struct {
     archive_index: bool = false,
     phdrs: bool = false,
     shdrs: bool = false,
+    section_groups: bool = false,
     symbols: bool = false,
     dynamic_symbols: bool = false,
     dynamic_section: bool = false,
@@ -346,6 +355,7 @@ const PrintMatrix = packed struct {
             .archive_index = true,
             .phdrs = true,
             .shdrs = true,
+            .section_groups = true,
             .symbols = true,
             .dynamic_symbols = true,
             .dynamic_section = true,
