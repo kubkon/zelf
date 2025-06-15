@@ -6,7 +6,7 @@ pub fn build(b: *std.Build) void {
     const mode = b.standardOptimizeOption(.{});
 
     const use_llvm = b.option(bool, "use-llvm", "Whether to use LLVM") orelse true;
-    const use_lld = if (builtin.target.isDarwin()) false else use_llvm;
+    const use_lld = if (builtin.target.os.tag.isDarwin()) false else use_llvm;
 
     const exe = b.addExecutable(.{
         .name = "zelf",

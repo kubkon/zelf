@@ -19,19 +19,19 @@ dynsymtab: std.ArrayListUnmanaged(elf.Elf64_Sym) = .{},
 dynstrtab: []const u8 = &[0]u8{},
 
 versymtab_index: ?u32 = null,
-versymtab: std.ArrayListUnmanaged(elf.Elf64_Versym) = .{},
+versymtab: std.ArrayListUnmanaged(elf.Versym) = .{},
 
 verdef_index: ?u32 = null,
-verdefsyms: std.ArrayListUnmanaged(VersionSym(elf.Elf64_Verdef)) = .{},
+verdefsyms: std.ArrayListUnmanaged(VersionSym(elf.Verdef)) = .{},
 /// Lookup to verdefsyms.
-verdefsyms_lookup: std.AutoHashMapUnmanaged(u32, u32) = .{},
-verdefaux: std.ArrayListUnmanaged(VersionSymAux(elf.Elf64_Verdaux)) = .{},
+verdefsyms_lookup: std.AutoHashMapUnmanaged(elf.VER_NDX, u32) = .{},
+verdefaux: std.ArrayListUnmanaged(VersionSymAux(elf.Verdaux)) = .{},
 
 verneed_index: ?u32 = null,
 verneedsyms: std.ArrayListUnmanaged(VersionSym(elf.Elf64_Verneed)) = .{},
 /// Lookup to verneedaux.
 verneedsyms_lookup: std.AutoHashMapUnmanaged(u32, u32) = .{},
-verneedaux: std.ArrayListUnmanaged(VersionSymAux(elf.Elf64_Vernaux)) = .{},
+verneedaux: std.ArrayListUnmanaged(VersionSymAux(elf.Vernaux)) = .{},
 
 pub fn parse(self: *Object) !void {
     var stream = std.io.fixedBufferStream(self.data);
@@ -178,9 +178,9 @@ pub fn parse(self: *Object) !void {
         elf.SHT_GNU_VERSYM => {
             self.versymtab_index = @as(u32, @intCast(i));
             const raw = self.getSectionContents(shdr);
-            const nsyms = @divExact(raw.len, @sizeOf(elf.Elf64_Versym));
+            const nsyms = @divExact(raw.len, @sizeOf(elf.Versym));
             try self.versymtab.ensureTotalCapacityPrecise(self.arena, nsyms);
-            const versymtab = @as([*]align(1) const elf.Elf64_Versym, @ptrCast(raw.ptr))[0..nsyms];
+            const versymtab = @as([*]align(1) const elf.Versym, @ptrCast(raw.ptr))[0..nsyms];
             self.versymtab.appendUnalignedSliceAssumeCapacity(versymtab);
         },
 
@@ -198,24 +198,13 @@ pub fn parse(self: *Object) !void {
             var i: u32 = 0;
             var offset: u32 = 0;
             while (i < nsyms) : (i += 1) {
-                const verdefsym: elf.Elf64_Verdef = if (self.is32Bit()) blk: {
-                    const verdefsym = @as(*align(1) const elf.Elf32_Verdef, @ptrCast(raw.ptr + offset)).*;
-                    break :blk .{
-                        .vd_version = verdefsym.vd_version,
-                        .vd_flags = verdefsym.vd_flags,
-                        .vd_ndx = verdefsym.vd_ndx,
-                        .vd_cnt = verdefsym.vd_cnt,
-                        .vd_hash = verdefsym.vd_hash,
-                        .vd_aux = verdefsym.vd_aux,
-                        .vd_next = verdefsym.vd_next,
-                    };
-                } else @as(*align(1) const elf.Elf64_Verdef, @ptrCast(raw.ptr + offset)).*;
+                const verdefsym: elf.Verdef = @as(*align(1) const elf.Verdef, @ptrCast(raw.ptr + offset)).*;
                 self.verdefsyms.appendAssumeCapacity(.{
                     .sym = verdefsym,
                     .off = offset,
                     .aux = undefined,
                 });
-                offset += verdefsym.vd_next;
+                offset += verdefsym.next;
             }
         }
 
@@ -223,21 +212,15 @@ pub fn parse(self: *Object) !void {
             const aux = @as(u32, @intCast(self.verdefaux.items.len));
             verdefsym.aux = aux;
 
-            self.verdefsyms_lookup.putAssumeCapacityNoClobber(verdefsym.sym.vd_ndx, @as(u32, @intCast(i)));
-            try self.verdefaux.ensureUnusedCapacity(self.arena, verdefsym.sym.vd_cnt);
+            self.verdefsyms_lookup.putAssumeCapacityNoClobber(verdefsym.sym.ndx, @as(u32, @intCast(i)));
+            try self.verdefaux.ensureUnusedCapacity(self.arena, verdefsym.sym.cnt);
 
             var j: u32 = 0;
-            var offset: u32 = verdefsym.off + verdefsym.sym.vd_aux;
-            while (j < verdefsym.sym.vd_cnt) : (j += 1) {
-                const verdefaux: elf.Elf64_Verdaux = if (self.is32Bit()) blk: {
-                    const verdefaux = @as(*align(1) const elf.Elf32_Verdaux, @ptrCast(raw.ptr + offset));
-                    break :blk .{
-                        .vda_name = verdefaux.vda_name,
-                        .vda_next = verdefaux.vda_next,
-                    };
-                } else @as(*align(1) const elf.Elf64_Verdaux, @ptrCast(raw.ptr + offset)).*;
+            var offset: u32 = verdefsym.off + verdefsym.sym.aux;
+            while (j < verdefsym.sym.cnt) : (j += 1) {
+                const verdefaux: elf.Verdaux = @as(*align(1) const elf.Verdaux, @ptrCast(raw.ptr + offset)).*;
                 self.verdefaux.appendAssumeCapacity(.{ .off = offset, .sym = verdefaux });
-                offset += verdefaux.vda_next;
+                offset += verdefaux.next;
             }
         }
     }
@@ -281,19 +264,10 @@ pub fn parse(self: *Object) !void {
             var i: u32 = 0;
             var offset: u32 = verneedsym.off + verneedsym.sym.vn_aux;
             while (i < verneedsym.sym.vn_cnt) : (i += 1) {
-                const verneedaux: elf.Elf64_Vernaux = if (self.is32Bit()) blk: {
-                    const verneedaux = @as(*align(1) const elf.Elf32_Vernaux, @ptrCast(raw.ptr + offset));
-                    break :blk .{
-                        .vna_hash = verneedaux.vna_hash,
-                        .vna_flags = verneedaux.vna_flags,
-                        .vna_other = verneedaux.vna_other,
-                        .vna_name = verneedaux.vna_name,
-                        .vna_next = verneedaux.vna_next,
-                    };
-                } else @as(*align(1) const elf.Elf64_Vernaux, @ptrCast(raw.ptr + offset)).*;
+                const verneedaux: elf.Vernaux = @as(*align(1) const elf.Vernaux, @ptrCast(raw.ptr + offset)).*;
                 self.verneedaux.appendAssumeCapacity(.{ .off = offset, .sym = verneedaux });
-                offset += verneedaux.vna_next;
-                self.verneedsyms_lookup.putAssumeCapacityNoClobber(verneedaux.vna_other, aux + i);
+                offset += verneedaux.next;
+                self.verneedsyms_lookup.putAssumeCapacityNoClobber(verneedaux.other, aux + i);
             }
         }
     }
@@ -353,6 +327,7 @@ pub fn printHeader(self: Object, writer: anytype) !void {
             .EXEC => "Executable file",
             .DYN => "Shared object file",
             .CORE => "Core file",
+            else => "Unknown file type",
         } });
     }
     try writer.print("  {s: <34} {s}\n", .{ "Machine:", switch (self.header.e_machine) {
@@ -869,13 +844,13 @@ fn printSymtab(
                 else => {
                     const base_name = getString(strtab, sym.st_name);
                     if (is_dynsym and self.versymtab_index != null) {
-                        const versym = self.versymtab.items[@as(u32, @intCast(i))] & elf.VERSYM_VERSION;
-                        if (self.verdefsyms_lookup.get(versym)) |verdef_index| {
+                        const versym = self.versymtab.items[@as(u32, @intCast(i))].VERSION;
+                        if (self.verdefsyms_lookup.get(@enumFromInt(versym))) |verdef_index| {
                             const verdef = self.verdefsyms.items[verdef_index];
                             const verdaux = self.verdefaux.items[verdef.aux];
                             break :blk try std.fmt.allocPrint(self.arena, "{s}@{s} ({d})", .{
                                 base_name,
-                                getString(strtab, verdaux.sym.vda_name),
+                                getString(strtab, verdaux.sym.name),
                                 versym,
                             });
                         }
@@ -883,7 +858,7 @@ fn printSymtab(
                             const vernaux = self.verneedaux.items[verneed_index];
                             break :blk try std.fmt.allocPrint(self.arena, "{s}@{s} ({d})", .{
                                 base_name,
-                                getString(strtab, vernaux.sym.vna_name),
+                                getString(strtab, vernaux.sym.name),
                                 versym,
                             });
                         }
@@ -1180,24 +1155,24 @@ pub fn printVersionSections(self: Object, writer: anytype) !void {
             try writer.print("  {x:0>4}", .{count});
 
             for (remaining[0..num]) |versym| {
-                const actual_versym = versym & elf.VERSYM_VERSION;
-                const name = switch (actual_versym) {
-                    elf.VER_NDX_LOCAL => "*local*",
-                    elf.VER_NDX_GLOBAL => "*global*",
+                const actual_versym = versym.VERSION;
+                const name = switch (@as(elf.VER_NDX, @enumFromInt(actual_versym))) {
+                    .LOCAL => "*local*",
+                    .GLOBAL => "*global*",
                     else => blk: {
-                        if (self.verdefsyms_lookup.get(actual_versym)) |verdef_index| {
+                        if (self.verdefsyms_lookup.get(@enumFromInt(actual_versym))) |verdef_index| {
                             const verdef = self.verdefsyms.items[verdef_index];
-                            const verauxs = self.verdefaux.items[verdef.aux..][0..verdef.sym.vd_cnt];
-                            break :blk getString(self.dynstrtab, verauxs[0].sym.vda_name);
+                            const verauxs = self.verdefaux.items[verdef.aux..][0..verdef.sym.cnt];
+                            break :blk getString(self.dynstrtab, verauxs[0].sym.name);
                         }
                         if (self.verneedsyms_lookup.get(actual_versym)) |vernaux_index| {
                             const vernaux = self.verneedaux.items[vernaux_index];
-                            break :blk getString(self.dynstrtab, vernaux.sym.vna_name);
+                            break :blk getString(self.dynstrtab, vernaux.sym.name);
                         }
                         break :blk try std.fmt.allocPrint(self.arena, "unknown({d})", .{actual_versym});
                     },
                 };
-                const hidden = versym & elf.VERSYM_HIDDEN != 0;
+                const hidden = versym.HIDDEN;
                 try writer.print(" {d: >4}{s}({s})", .{ actual_versym, if (hidden) "h" else " ", name });
             }
 
@@ -1220,26 +1195,26 @@ pub fn printVersionSections(self: Object, writer: anytype) !void {
         });
 
         for (self.verdefsyms.items) |verdef| {
-            const verauxs = self.verdefaux.items[verdef.aux..][0..verdef.sym.vd_cnt];
+            const verauxs = self.verdefaux.items[verdef.aux..][0..verdef.sym.cnt];
             try writer.print("  0x{x:0>8}: Rev: {d}  Flags: {s}  Index: {d: >2}  Cnt: {d: >2}  Name: {s}\n", .{
                 verdef.off,
-                verdef.sym.vd_version,
-                switch (verdef.sym.vd_flags) {
+                verdef.sym.version,
+                switch (verdef.sym.flags) {
                     0 => "none",
                     elf.VER_FLG_BASE => "BASE",
                     elf.VER_FLG_WEAK => "WEAK",
                     else => "unknown",
                 },
-                verdef.sym.vd_ndx,
-                verdef.sym.vd_cnt,
-                getString(self.dynstrtab, verauxs[0].sym.vda_name),
+                verdef.sym.ndx,
+                verdef.sym.cnt,
+                getString(self.dynstrtab, verauxs[0].sym.name),
             });
 
             for (verauxs[1..], 1..) |veraux, i| {
                 try writer.print("  0x{x:0>8}: Parent {d}: {s}\n", .{
                     veraux.off,
                     i,
-                    getString(self.dynstrtab, veraux.sym.vda_name),
+                    getString(self.dynstrtab, veraux.sym.name),
                 });
             }
         }
@@ -1272,14 +1247,14 @@ pub fn printVersionSections(self: Object, writer: anytype) !void {
             for (verauxs) |veraux| {
                 try writer.print("  0x{x:0>8}:   Name: {s}  Flags: {s}  Version: {d}\n", .{
                     veraux.off,
-                    getString(self.dynstrtab, veraux.sym.vna_name),
-                    switch (veraux.sym.vna_flags) {
+                    getString(self.dynstrtab, veraux.sym.name),
+                    switch (veraux.sym.flags) {
                         0 => "none",
                         elf.VER_FLG_BASE => "BASE",
                         elf.VER_FLG_WEAK => "WEAK",
                         else => "unknown",
                     },
-                    veraux.sym.vna_other,
+                    veraux.sym.other,
                 });
             }
         }
